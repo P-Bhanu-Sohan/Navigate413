@@ -1,157 +1,116 @@
 import logging
-from typing import Awaitable, Callable
+import asyncio
 from langgraph.graph import StateGraph, END
-from pipelines.intent_router import classify_document_domain
 from agents.base_agents import (
     AgentState,
+    router_agent,
     finance_agent,
     housing_agent,
     visa_agent,
-    rag_agent
+    rag_agent,
+    risk_agent
 )
-from agents.specialized_agents import translation_agent, scenario_agent
 
 logger = logging.getLogger(__name__)
 
 
-async def intent_router_node(state: AgentState) -> AgentState:
-    """Classify document domain and route to appropriate agent."""
-    try:
-        text = state.get("raw_text", "")
-        domain = await classify_document_domain(text)
-        state["domain"] = domain
-        logger.info(f"Classified document as: {domain}")
-        return state
-    except Exception as e:
-        logger.error(f"Intent router error: {e}")
-        state["domain"] = "unknown"
-        state["error"] = str(e)
-        return state
-
-
 def build_graph():
-    """Build the LangGraph workflow."""
+    """
+    Build the LangGraph workflow for document analysis.
+    
+    Flow:
+    Router → (Finance/Housing/Visa based on domain) → RAG → Risk → Output
+    """
     graph = StateGraph(AgentState)
     
-    # Wrapper functions to handle async nodes in LangGraph
-    def sync_intent_router(state):
-        import asyncio
-        return asyncio.run(intent_router_node(state))
+    # Convert async agents to sync wrappers for LangGraph
+    def sync_router(state):
+        return asyncio.run(router_agent(state))
     
-    def sync_finance_agent(state):
-        import asyncio
+    def sync_finance(state):
         return asyncio.run(finance_agent(state))
     
-    def sync_housing_agent(state):
-        import asyncio
+    def sync_housing(state):
         return asyncio.run(housing_agent(state))
     
-    def sync_visa_agent(state):
-        import asyncio
+    def sync_visa(state):
         return asyncio.run(visa_agent(state))
     
-    def sync_rag_agent(state):
-        import asyncio
+    def sync_rag(state):
         return asyncio.run(rag_agent(state))
     
-    def sync_translation_agent(state):
-        import asyncio
-        return asyncio.run(translation_agent(state))
-    
-    def sync_scenario_agent(state):
-        import asyncio
-        return asyncio.run(scenario_agent(state))
+    def sync_risk(state):
+        return asyncio.run(risk_agent(state))
     
     # Add nodes
-    graph.add_node("intent_router", sync_intent_router)
-    graph.add_node("finance_agent", sync_finance_agent)
-    graph.add_node("housing_agent", sync_housing_agent)
-    graph.add_node("visa_agent", sync_visa_agent)
-    graph.add_node("rag_agent", sync_rag_agent)
-    graph.add_node("translation_agent", sync_translation_agent)
-    graph.add_node("scenario_agent", sync_scenario_agent)
+    graph.add_node("router", sync_router)
+    graph.add_node("finance", sync_finance)
+    graph.add_node("housing", sync_housing)
+    graph.add_node("visa", sync_visa)
+    graph.add_node("rag", sync_rag)
+    graph.add_node("risk", sync_risk)
     
-    # Define routing logic
-    def route_by_domain(state):
-        domain = state.get("domain", "unknown")
+    # Router determines which specialized agent to call
+    def route_to_domain(state):
+        domain = state.get("domain", "general")
         if domain == "finance":
-            return "finance_agent"
+            return "finance"
         elif domain == "housing":
-            return "housing_agent"
+            return "housing"
         elif domain == "visa":
-            return "visa_agent"
+            return "visa"
         else:
-            # For unknown, still process but mark as such
-            return "rag_agent"
+            return "rag"  # Default to RAG if no specific domain
     
-    # Set entry point
-    graph.set_entry_point("intent_router")
-    
-    # Add edges
-    graph.add_conditional_edges(
-        "intent_router",
-        route_by_domain,
-        {
-            "finance_agent": "finance_agent",
-            "housing_agent": "housing_agent",
-            "visa_agent": "visa_agent",
-            "rag_agent": "rag_agent"
-        }
-    )
-    
-    # All domain agents lead to RAG agent
-    graph.add_edge("finance_agent", "rag_agent")
-    graph.add_edge("housing_agent", "rag_agent")
-    graph.add_edge("visa_agent", "rag_agent")
-    
-    # RAG agent leads to conditional translation/scenario
-    def needs_translation(state):
-        language = state.get("language", "en")
-        return language != "en"
-    
-    def needs_scenario(state):
-        return state.get("scenario") is not None
-    
-    # After RAG, check if translation needed
-    def route_after_rag(state):
-        if needs_translation(state):
-            return "translation_agent"
-        elif needs_scenario(state):
-            return "scenario_agent"
-        else:
-            return END
-    
-    graph.add_conditional_edges(
-        "rag_agent",
-        route_after_rag,
-        {
-            "translation_agent": "translation_agent",
-            "scenario_agent": "scenario_agent",
-            END: END
-        }
-    )
-    
-    # Translation can lead to scenario
-    def route_after_translation(state):
-        if needs_scenario(state):
-            return "scenario_agent"
-        else:
-            return END
-    
-    graph.add_conditional_edges(
-        "translation_agent",
-        route_after_translation,
-        {
-            "scenario_agent": "scenario_agent",
-            END: END
-        }
-    )
-    
-    # Scenario leads to end
-    graph.add_edge("scenario_agent", END)
+    # Define edges
+    graph.add_edge("START", "router")
+    graph.add_conditional_edges("router", route_to_domain)
+    graph.add_edge("finance", "rag")
+    graph.add_edge("housing", "rag")
+    graph.add_edge("visa", "rag")
+    graph.add_edge("rag", "risk")
+    graph.add_edge("risk", END)
     
     return graph.compile()
 
 
-# Build the compiled graph
-workflow = build_graph()
+async def run_analysis_workflow(session_id: str, raw_text: str):
+    """
+    Execute the full analysis workflow.
+    
+    Returns the final state with all agent outputs.
+    """
+    try:
+        graph = build_graph()
+        
+        # Initialize state
+        initial_state = AgentState(
+            session_id=session_id,
+            raw_text=raw_text,
+            domain="",
+            language="en",
+            clauses=[],
+            obligations=[],
+            financial_details=None,
+            housing_details=None,
+            visa_details=None,
+            risk_assessment=None,
+            red_flags=[],
+            resources=[],
+            translation=None,
+            scenario=None,
+            error=None
+        )
+        
+        # Run the workflow
+        final_state = await asyncio.to_thread(graph.invoke, initial_state)
+        
+        logger.info(f"Analysis complete for session {session_id}")
+        return final_state
+        
+    except Exception as e:
+        logger.error(f"Workflow execution error: {e}")
+        return {
+            "error": str(e),
+            "session_id": session_id
+        }

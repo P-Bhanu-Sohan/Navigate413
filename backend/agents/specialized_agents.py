@@ -1,77 +1,79 @@
 import logging
-import google.generativeai as genai
-from config import GEMINI_API_KEY, GEMINI_MODEL
-from agents.base_agents import AgentState, call_gemini_structured
-import json
+import asyncio
+from agents.base_agents import AgentState, call_gemini_with_reasoning, get_context_for_agent
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-
 
 async def translation_agent(state: AgentState) -> AgentState:
-    """Translate plain-language summary to target language."""
+    """
+    Translation Agent: Translates complex clauses to plain language.
+    Uses reasoning to explain legal/financial jargon in simple terms.
+    """
     try:
-        summary = state.get("risk_output", {}).get("summary", "")
+        clauses = state.get("clauses", [])
         language = state.get("language", "en")
         
-        if language == "en":
-            state["translation"] = summary
+        if language == "en" or not clauses:
             return state
         
-        prompt = f"""Translate this student-friendly explanation to {language}. Return ONLY the translated text, no JSON needed.
+        clauses_text = "\n".join(clauses[:5])  # Top 5 clauses
+        
+        prompt = f"""You are a translation agent. Translate these legal/financial clauses into plain, simple language that a student can understand.
 
-Original text:
-{summary}"""
+ORIGINAL CLAUSES:
+{clauses_text}
+
+TARGET LANGUAGE: {language}
+
+Provide clear, simple explanations. Avoid jargon. Make sure the student understands what they're actually agreeing to."""
+
+        translation = await call_gemini_with_reasoning(prompt, temperature=0.6)
+        state["translation"] = translation
         
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(prompt)
-        
-        state["translation"] = response.text.strip()
         return state
+        
     except Exception as e:
         logger.error(f"Translation agent error: {e}")
-        state["error"] = str(e)
         return state
 
 
 async def scenario_agent(state: AgentState) -> AgentState:
-    """Simulate deterministic financial/contractual scenarios."""
+    """
+    Scenario Agent: Simulates real-world scenarios to help students understand implications.
+    Uses reasoning to walk through "what if" situations.
+    """
     try:
-        domain = state.get("domain", "")
-        scenario_params = state.get("scenario", {})
+        financial = state.get("financial_details", "")
+        housing = state.get("housing_details", "")
+        obligations = state.get("obligations", [])
         
-        if not scenario_params:
+        if not financial and not housing and not obligations:
             return state
         
-        scenario_type = scenario_params.get("scenario", "")
-        params = scenario_params.get("parameters", {})
+        context = f"""
+FINANCIAL DETAILS: {financial}
+HOUSING DETAILS: {housing}
+KEY OBLIGATIONS: {', '.join(obligations[:3])}
+"""
         
-        # Deterministic formula for scenario exposure
-        exposure = 0.0
-        formula = ""
-        explanation = ""
-        
-        if scenario_type == "early_termination":
-            base_penalty = params.get("base_penalty", 0)
-            months_remaining = params.get("months_remaining", 0)
-            penalty_rate = params.get("penalty_rate_per_month", 0)
-            
-            exposure = base_penalty + (months_remaining * penalty_rate)
-            formula = "base_penalty + (months_remaining × penalty_rate)"
-            explanation = f"Terminating the lease {months_remaining} months early would cost approximately ${exposure:.2f} based on the contract terms."
-        
-        state["scenario"] = {
-            "scenario": scenario_type,
-            "exposure_estimate": exposure,
-            "formula_used": formula,
-            "explanation": explanation,
-            "caveats": ["This is an estimate only. Consult Student Legal Services for formal advice."]
-        }
+        prompt = f"""You are a scenario analyst. Create 2-3 realistic "what if" scenarios based on these document details.
+
+{context}
+
+For each scenario:
+1. Describe the situation (e.g., "Student loses on-campus job in month 3")
+2. Explain what happens based on the document terms
+3. Show the financial/legal implications
+4. Suggest what the student should do
+
+Make scenarios concrete and actionable."""
+
+        scenarios = await call_gemini_with_reasoning(prompt, temperature=0.8)
+        state["scenario"] = scenarios
         
         return state
+        
     except Exception as e:
         logger.error(f"Scenario agent error: {e}")
-        state["error"] = str(e)
         return state

@@ -1,10 +1,8 @@
 import logging
 from typing import TypedDict, Optional, List, Dict, Any
-import json
 import google.generativeai as genai
 from config import GEMINI_API_KEY, GEMINI_MODEL
 from tools.retrieval_tool import GlobalRetrievalTool
-from models.risk_models import RiskModel
 
 logger = logging.getLogger(__name__)
 
@@ -13,114 +11,159 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 
 class AgentState(TypedDict):
-    """Shared state dictionary for the LangGraph."""
+    """Shared state dictionary for the agent workflow."""
     session_id: str
     raw_text: str
     domain: str
     language: str
-    clauses: List[Dict[str, Any]]
-    risk_output: Dict[str, Any]
+    clauses: List[str]
+    obligations: List[str]
+    financial_details: Optional[str]
+    housing_details: Optional[str]
+    visa_details: Optional[str]
+    risk_assessment: Optional[str]
+    red_flags: List[str]
     resources: List[Dict[str, Any]]
     translation: Optional[str]
-    scenario: Optional[Dict[str, Any]]
+    scenario: Optional[str]
     error: Optional[str]
 
 
-async def call_gemini_structured(
-    prompt: str,
-    schema_name: str = "output"
-) -> Optional[Dict[str, Any]]:
-    """Call Gemini with structured JSON output enforcement."""
+async def get_context_for_agent(
+    query_text: str,
+    domain: str = None,
+    top_k: int = 5
+) -> str:
+    """
+    Global retrieval tool accessible to all agents.
+    Returns relevant context from vector store and MongoDB.
+    """
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL)
-        response = model.generate_content(prompt)
-        response_text = response.text.strip()
-        
-        # Parse JSON
-        try:
-            return json.loads(response_text)
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON from Gemini: {response_text}")
-            # Retry with explicit instruction
-            retry_prompt = prompt + "\n\nYOU MUST RESPOND WITH ONLY VALID JSON, NO OTHER TEXT."
-            response = model.generate_content(retry_prompt)
-            response_text = response.text.strip()
-            return json.loads(response_text)
-    except Exception as e:
-        logger.error(f"Gemini call error: {e}")
-        return None
-
-
-async def finance_agent(state: AgentState) -> AgentState:
-    """Analyze financial documents for risk."""
-    try:
-        text = state.get("raw_text", "")
-        session_id = state.get("session_id", "")
-        
-        # Retrieve relevant clauses
         context = await GlobalRetrievalTool(
-            query_text="financial obligations, penalties, deadlines, aid cancellation",
-            domain_filter="finance",
-            top_k=5,
+            query_text=query_text,
+            domain_filter=domain,
+            top_k=top_k,
             collection_type="clause"
         )
         
-        context_str = "\n".join([c.get("clause_text", "") for c in context])
+        # Format context for agent consumption
+        context_str = "\n".join([
+            f"- {c.get('clause_text', '')}" for c in context
+        ])
         
-        prompt = f"""You are a financial risk analysis agent specializing in university financial aid documents.
-        
-Retrieved context:
-{context_str}
+        return context_str if context_str else "No relevant context found."
+    except Exception as e:
+        logger.error(f"Context retrieval error: {e}")
+        return f"[Context retrieval failed: {e}]"
 
-Document excerpt:
-{text[:2000]}
 
-Analyze and return ONLY a JSON object with this exact structure:
-{{
-    "risk_indicators": {{
-        "financial_exposure_amount": <number>,
-        "financial_exposure_indicator": <0-1>,
-        "penalty_escalation_indicator": <0-1>,
-        "deadline_sensitivity_indicator": <0-1>
-    }},
-    "obligations": ["obligation1", "obligation2"],
-    "deadlines": ["deadline1", "deadline2"],
-    "clauses": [
-        {{
-            "text": "clause text",
-            "flag": "FLAG_NAME",
-            "risk_contribution": <0-1>,
-            "explanation": "plain language explanation"
-        }}
-    ],
-    "plain_explanation": "one sentence summary"
-}}
-
-Return ONLY the JSON object, no other text."""
-        
-        result = await call_gemini_structured(prompt, "finance_output")
-        
-        if result:
-            # Calculate risk score
-            indicators = result.get("risk_indicators", {})
-            risk_score = RiskModel.finance_risk_score(
-                indicators.get("financial_exposure_indicator", 0),
-                indicators.get("penalty_escalation_indicator", 0),
-                indicators.get("deadline_sensitivity_indicator", 0)
-            )
-            
-            state["domain"] = "finance"
-            state["risk_output"] = {
-                "risk_score": risk_score,
-                "risk_level": RiskModel.risk_level_from_score(risk_score),
-                "indicators": indicators,
-                "obligations": result.get("obligations", []),
-                "deadlines": result.get("deadlines", []),
-                "summary": result.get("plain_explanation", "")
+async def call_gemini_with_reasoning(
+    prompt: str,
+    temperature: float = 0.7
+) -> str:
+    """
+    Call Gemini for open-ended reasoning without JSON rigidity.
+    Uses natural language output for better agent reasoning.
+    """
+    try:
+        model = genai.GenerativeModel(
+            GEMINI_MODEL,
+            generation_config={
+                "temperature": temperature,
+                "top_p": 0.9,
             }
-            state["clauses"] = result.get("clauses", [])
+        )
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error(f"Gemini call error: {e}")
+        return f"Error generating response: {e}"
+
+
+async def router_agent(state: AgentState) -> AgentState:
+    """
+    Router Agent: Classifies document and extracts initial context.
+    Uses reasoning to understand what type of document this is and why.
+    """
+    try:
+        text = state.get("raw_text", "")
+        
+        prompt = f"""You are the Router Agent for document analysis. Analyze this document excerpt and determine:
+
+1. What TYPE of document is this? (financial aid, lease agreement, visa requirement, etc.)
+2. What DOMAIN does it belong to? (finance, housing, visa, or multiple)
+3. What is the PRIMARY PURPOSE of this document?
+4. What are the 2-3 most CRITICAL concerns a student should be aware of?
+
+Document:
+{text[:3000]}
+
+Provide your analysis in clear paragraphs. Be specific about the document type and domain."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.5)
+        
+        # Extract domain from reasoning (simplified)
+        if "finance" in analysis.lower() or "aid" in analysis.lower():
+            state["domain"] = "finance"
+        elif "housing" in analysis.lower() or "lease" in analysis.lower():
+            state["domain"] = "housing"
+        elif "visa" in analysis.lower() or "immigration" in analysis.lower():
+            state["domain"] = "visa"
+        else:
+            state["domain"] = "general"
+        
+        logger.info(f"Router classified document as: {state['domain']}")
+        return state
+        
+    except Exception as e:
+        logger.error(f"Router agent error: {e}")
+        state["error"] = str(e)
+        return state
+
+
+async def finance_agent(state: AgentState) -> AgentState:
+    """
+    Finance Agent: Extracts financial obligations, deadlines, and costs.
+    Uses reasoning to identify financial touchpoints and hidden fees.
+    """
+    try:
+        text = state.get("raw_text", "")
+        
+        # Get relevant financial context from retrieval tool
+        context = await get_context_for_agent(
+            query_text="tuition fees payment deadlines penalties financial obligations",
+            domain="finance",
+            top_k=5
+        )
+        
+        prompt = f"""You are the Finance Agent for document analysis. Your goal is to identify every financial touchpoint in this document.
+
+DOCUMENT TO ANALYZE:
+{text[:4000]}
+
+RELEVANT CONTEXT FROM SIMILAR DOCUMENTS:
+{context}
+
+Analyze the document and:
+1. List ALL financial obligations (tuition, fees, payments, deposits, etc.)
+2. Identify EVERY deadline associated with payments
+3. Find ANY penalties or fees for late/missed payments
+4. Highlight HIDDEN COSTS or unusual financial terms
+5. Explain the FINANCIAL IMPACT if obligations aren't met
+
+Be thorough and scrutinize every financial detail. Present your findings as clear, actionable insights for a student."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.7)
+        
+        state["financial_details"] = analysis
+        
+        # Extract obligations as a list (simple line-by-line parsing)
+        lines = analysis.split('\n')
+        obligations = [line.strip() for line in lines if line.strip() and len(line) > 20]
+        state["obligations"].extend(obligations[:10])  # Keep top findings
         
         return state
+        
     except Exception as e:
         logger.error(f"Finance agent error: {e}")
         state["error"] = str(e)
@@ -128,76 +171,45 @@ Return ONLY the JSON object, no other text."""
 
 
 async def housing_agent(state: AgentState) -> AgentState:
-    """Analyze housing documents for risk."""
+    """
+    Housing Agent: Processes lease terms, dates, and cancellation policies.
+    Uses reasoning to identify logistical and legal housing realities.
+    """
     try:
         text = state.get("raw_text", "")
         
-        # Retrieve relevant clauses
-        context = await GlobalRetrievalTool(
-            query_text="lease termination, penalties, liability, payment obligations",
-            domain_filter="housing",
-            top_k=5,
-            collection_type="clause"
+        # Get relevant housing context
+        context = await get_context_for_agent(
+            query_text="move-in move-out lease cancellation maintenance responsibilities",
+            domain="housing",
+            top_k=5
         )
         
-        context_str = "\n".join([c.get("clause_text", "") for c in context])
+        prompt = f"""You are the Housing Agent specializing in residential agreements and leases.
+
+DOCUMENT TO ANALYZE:
+{text[:4000]}
+
+RELEVANT HOUSING CONTEXT:
+{context}
+
+Your task:
+1. Identify ALL move-in and move-out dates
+2. Detail maintenance responsibilities and who pays for what
+3. ANALYZE the cancellation policy - what is the "point of no return"?
+4. Calculate any BUYOUT COSTS if the lease is broken early
+5. Identify PENALTIES for damages, early termination, or policy violations
+6. Flag any UNUSUAL or UNFAIR terms that disadvantage the tenant
+
+Present your findings as a practical guide for the student."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.7)
         
-        prompt = f"""You are a housing contract analysis agent for university leases.
-
-Retrieved context:
-{context_str}
-
-Document excerpt:
-{text[:2000]}
-
-Analyze and return ONLY a JSON object with this exact structure:
-{{
-    "risk_indicators": {{
-        "termination_penalty_indicator": <0-1>,
-        "liability_clause_indicator": <0-1>,
-        "payment_obligation_indicator": <0-1>
-    }},
-    "obligations": ["obligation1"],
-    "clauses": [
-        {{
-            "text": "clause text",
-            "flag": "FLAG_NAME",
-            "risk_contribution": <0-1>,
-            "explanation": "plain language explanation"
-        }}
-    ],
-    "extracted_parameters": {{
-        "base_penalty": <number or null>,
-        "penalty_rate_per_month": <number or null>
-    }},
-    "plain_explanation": "one sentence summary"
-}}
-
-Return ONLY the JSON object, no other text."""
-        
-        result = await call_gemini_structured(prompt, "housing_output")
-        
-        if result:
-            # Calculate risk score
-            indicators = result.get("risk_indicators", {})
-            risk_score = RiskModel.housing_risk_score(
-                indicators.get("termination_penalty_indicator", 0),
-                indicators.get("liability_clause_indicator", 0),
-                indicators.get("payment_obligation_indicator", 0)
-            )
-            
-            state["domain"] = "housing"
-            state["risk_output"] = {
-                "risk_score": risk_score,
-                "risk_level": RiskModel.risk_level_from_score(risk_score),
-                "indicators": indicators,
-                "obligations": result.get("obligations", []),
-                "summary": result.get("plain_explanation", ""),
-                "scenario_parameters": result.get("extracted_parameters", {})
-            }
-            state["clauses"] = result.get("clauses", [])
+        state["housing_details"] = analysis
+        state["clauses"].append(analysis)
         
         return state
+        
     except Exception as e:
         logger.error(f"Housing agent error: {e}")
         state["error"] = str(e)
@@ -205,62 +217,45 @@ Return ONLY the JSON object, no other text."""
 
 
 async def visa_agent(state: AgentState) -> AgentState:
-    """Analyze visa/compliance documents."""
+    """
+    Visa Agent: Extracts visa requirements and compliance obligations.
+    Uses reasoning to ensure international students maintain legal standing.
+    """
     try:
         text = state.get("raw_text", "")
         
-        # Retrieve relevant clauses
-        context = await GlobalRetrievalTool(
-            query_text="work authorization, enrollment requirements, visa status, compliance",
-            domain_filter="visa",
-            top_k=5,
-            collection_type="clause"
+        # Get relevant visa context
+        context = await get_context_for_agent(
+            query_text="visa I-20 F-1 J-1 immigration compliance status international",
+            domain="visa",
+            top_k=5
         )
         
-        context_str = "\n".join([c.get("clause_text", "") for c in context])
+        prompt = f"""You are the Visa and Immigration Compliance Agent for international students.
+
+DOCUMENT TO ANALYZE:
+{text[:4000]}
+
+RELEVANT COMPLIANCE CONTEXT:
+{context}
+
+Your task:
+1. Extract ALL visa-related requirements (I-20, employment, health insurance, etc.)
+2. Identify COMPLIANCE OBLIGATIONS for F-1/J-1 status maintenance
+3. List STATUS CHANGE NOTIFICATIONS or conditions that could jeopardize visa
+4. Flag any CRITICAL DEADLINES for visa renewals or form submissions
+5. Identify LEGAL RISKS if obligations aren't met
+6. Highlight any unusual provisions that could affect immigration status
+
+Be comprehensive - missing a compliance obligation could result in visa revocation."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.5)
         
-        prompt = f"""You are a visa and international student compliance agent.
-
-Retrieved context:
-{context_str}
-
-Document excerpt:
-{text[:2000]}
-
-Analyze and return ONLY a JSON object with this exact structure:
-{{
-    "risk_level": "COMPLIANT|AT_RISK|VIOLATION_LIKELY",
-    "risk_factors": ["factor1", "factor2"],
-    "clauses": [
-        {{
-            "text": "clause text",
-            "flag": "FLAG_NAME",
-            "explanation": "plain language explanation"
-        }}
-    ],
-    "obligations": ["obligation1"],
-    "plain_explanation": "one sentence summary"
-}}
-
-Return ONLY the JSON object, no other text."""
-        
-        result = await call_gemini_structured(prompt, "visa_output")
-        
-        if result:
-            risk_level = result.get("risk_level", "AT_RISK")
-            risk_score = 0.2 if risk_level == "COMPLIANT" else (0.5 if risk_level == "AT_RISK" else 0.9)
-            
-            state["domain"] = "visa"
-            state["risk_output"] = {
-                "risk_level": risk_level,
-                "risk_score": risk_score,
-                "risk_factors": result.get("risk_factors", []),
-                "obligations": result.get("obligations", []),
-                "summary": result.get("plain_explanation", "")
-            }
-            state["clauses"] = result.get("clauses", [])
+        state["visa_details"] = analysis
+        state["obligations"].append(analysis)
         
         return state
+        
     except Exception as e:
         logger.error(f"Visa agent error: {e}")
         state["error"] = str(e)
@@ -268,22 +263,98 @@ Return ONLY the JSON object, no other text."""
 
 
 async def rag_agent(state: AgentState) -> AgentState:
-    """Retrieve and provide relevant campus resources."""
+    """
+    RAG Agent: Bridges documents to campus resources.
+    Uses reasoning to match student situations with actual support services.
+    """
     try:
-        domain = state.get("domain", "unknown")
-        summary = state.get("risk_output", {}).get("summary", "")
+        financial_context = state.get("financial_details", "")
+        housing_context = state.get("housing_details", "")
+        visa_context = state.get("visa_details", "")
         
-        # Search for relevant resources
-        resources = await GlobalRetrievalTool(
-            query_text=summary,
-            domain_filter=domain if domain != "unknown" else None,
-            top_k=3,
-            collection_type="resource"
-        )
+        # Determine what resources to search for based on agent findings
+        search_queries = []
+        if financial_context and "penalty" in financial_context.lower():
+            search_queries.append("financial aid emergency loans bursar")
+        if financial_context and "tuition" in financial_context.lower():
+            search_queries.append("tuition payment plans financial assistance")
+        if housing_context:
+            search_queries.append("housing off-campus residential life")
+        if visa_context:
+            search_queries.append("international students visa immigration")
+        
+        resources = []
+        for query in search_queries:
+            context = await get_context_for_agent(
+                query_text=query,
+                top_k=3
+            )
+            if context and "No relevant context" not in context:
+                resources.append({
+                    "query": query,
+                    "context": context
+                })
         
         state["resources"] = resources
         return state
+        
     except Exception as e:
         logger.error(f"RAG agent error: {e}")
+        state["error"] = str(e)
+        return state
+
+
+async def risk_agent(state: AgentState) -> AgentState:
+    """
+    Risk Agent: Performs holistic risk assessment through reasoning.
+    Identifies red flags and explains risks in human terms, not math.
+    """
+    try:
+        text = state.get("raw_text", "")
+        financial = state.get("financial_details", "")
+        housing = state.get("housing_details", "")
+        visa = state.get("visa_details", "")
+        
+        prompt = f"""You are the Risk Agent - the final auditor of this document analysis. Your job is to identify RISKS and RED FLAGS.
+
+ORIGINAL DOCUMENT:
+{text[:3000]}
+
+FINANCIAL ANALYSIS:
+{financial}
+
+HOUSING ANALYSIS:
+{housing}
+
+VISA ANALYSIS:
+{visa}
+
+Now analyze and:
+1. IDENTIFY CONFLICTS between different sections or clauses
+2. FLAG HIGH-LIABILITY TERMS that could harm the student
+3. Highlight PREDATORY PRACTICES (e.g., excessive penalties, waived rights)
+4. Look for AMBIGUOUS LANGUAGE that could be interpreted against the student
+5. Assess OVERALL RISK LEVEL based on reasoning, not math
+
+Assign an overall risk level: LOW, MEDIUM, or HIGH
+
+Provide specific reasoning for each red flag. Be direct about what could go wrong."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.7)
+        
+        state["risk_assessment"] = analysis
+        
+        # Extract red flags (simple pattern matching on reasoning)
+        if "high" in analysis.lower():
+            state["red_flags"].append("Document contains high-risk terms")
+        if "predatory" in analysis.lower():
+            state["red_flags"].append("Potentially predatory practices identified")
+        if "ambiguous" in analysis.lower():
+            state["red_flags"].append("Ambiguous language that could harm student")
+        
+        return state
+        
+    except Exception as e:
+        logger.error(f"Risk agent error: {e}")
         state["error"] = str(e)
         return state
