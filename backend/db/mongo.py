@@ -1,20 +1,24 @@
 import logging
-from motor.motor_asyncio import AsyncClient, AsyncDatabase
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase, AsyncIOMotorGridFSBucket
 from pymongo import ASCENDING, DESCENDING
 from config import MONGODB_URI, MONGODB_DB_NAME
 
 logger = logging.getLogger(__name__)
 
-_client: AsyncClient = None
-_db: AsyncDatabase = None
+_client: AsyncIOMotorClient = None
+_db: AsyncIOMotorDatabase = None
+_gridfs_bucket: AsyncIOMotorGridFSBucket = None
 
 
 async def connect_to_mongo():
     """Initialize MongoDB connection."""
-    global _client, _db
+    global _client, _db, _gridfs_bucket
     try:
-        _client = AsyncClient(MONGODB_URI)
+        _client = AsyncIOMotorClient(MONGODB_URI)
         _db = _client[MONGODB_DB_NAME]
+        
+        # Initialize GridFS bucket for PDF storage
+        _gridfs_bucket = AsyncIOMotorGridFSBucket(_db)
         
         # Verify connection
         await _db.command("ping")
@@ -38,7 +42,7 @@ async def disconnect_from_mongo():
 
 async def _create_indexes():
     """Create necessary MongoDB indexes."""
-    if not _db:
+    if _db is None:
         return
     
     try:
@@ -57,8 +61,15 @@ async def _create_indexes():
         logger.warning(f"Index creation warning (may already exist): {e}")
 
 
-def get_db() -> AsyncDatabase:
+def get_db() -> AsyncIOMotorDatabase:
     """Get the current database instance."""
     if _db is None:
         raise RuntimeError("Database not connected. Call connect_to_mongo() first.")
     return _db
+
+
+def get_gridfs_bucket() -> AsyncIOMotorGridFSBucket:
+    """Get the GridFS bucket for file storage."""
+    if _gridfs_bucket is None:
+        raise RuntimeError("GridFS bucket not initialized. Call connect_to_mongo() first.")
+    return _gridfs_bucket
