@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import google.generativeai as genai
 from config import GEMINI_API_KEY, GEMINI_MODEL
 from db.mongo import get_db
+from tools.retrieval_tool import GlobalRetrievalTool
 
 logger = logging.getLogger(__name__)
 
@@ -24,42 +25,88 @@ class ChatResponse(BaseModel):
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Chat endpoint for document-related questions."""
+    """Chat endpoint for document-related questions with RAG context."""
     try:
+        print(f"\n💬 [CHAT] Received message: {request.message[:50]}...")
+        
         db = get_db()
         message = request.message
         session_id = request.session_id
         
         # Retrieve document analysis if session exists
-        context = ""
+        doc_context = ""
         if session_id:
+            print(f"💬 [CHAT] Looking up session: {session_id}")
             doc = await db["documents_metadata"].find_one({"_id": session_id})
             if doc and "analysis_results" in doc:
                 analysis = doc["analysis_results"]
                 domain = analysis.get("domain", "unknown")
                 risk_output = analysis.get("risk_output", {})
                 summary = risk_output.get("summary", "")
-                context = f"""
+                doc_context = f"""
 Document Domain: {domain}
 Risk Level: {risk_output.get('risk_level', 'unknown')}
 Summary: {summary}
 Obligations: {', '.join(risk_output.get('obligations', []))}
 """
+                print(f"💬 [CHAT] Found document context for domain: {domain}")
         
-        # Build prompt
-        prompt = f"""You are Navigate413, a helpful assistant for UMass Amherst students understanding complex documents.
+        # RAG: Search campus_embeddings collection for similar clauses
+        print(f"💬 [CHAT] Searching campus_embeddings collection for: {message[:50]}...")
+        rag_results = await GlobalRetrievalTool(
+            query_text=message,
+            domain_filter=None,
+            top_k=5,
+            collection_type="clause"  # Search campus_embeddings only
+        )
+        
+        print(f"💬 [CHAT] RAG retrieved {len(rag_results)} similar clauses")
+        
+        # Format RAG context with FULL clause text for better responses
+        rag_context = ""
+        if rag_results:
+            rag_clauses = []
+            for i, result in enumerate(rag_results[:5], 1):
+                clause_text = result.get("clause_text", "")
+                score = result.get("score", 0)
+                risk_metadata = result.get("risk_metadata", {})
+                if clause_text:
+                    # Include FULL clause text, not truncated
+                    clause_entry = f"\n[CLAUSE {i}] (Relevance: {score:.2f})\n{clause_text}"
+                    if risk_metadata:
+                        clause_entry += f"\n[Risk Flag: {risk_metadata.get('flag', 'N/A')}]"
+                    rag_clauses.append(clause_entry)
+            
+            if rag_clauses:
+                rag_context = "\n\n=== RELEVANT DOCUMENT CLAUSES ==="
+                rag_context += "".join(rag_clauses)
+                rag_context += "\n=== END CLAUSES ==="
+                print(f"💬 [CHAT] Injected {len(rag_clauses)} FULL clauses into context")
+            else:
+                print(f"💬 [CHAT] No relevant clauses found (empty campus_embeddings collection?)")
+        else:
+            print(f"💬 [CHAT] No RAG results - campus_embeddings collection may be empty")
+        
+        # Build enhanced prompt with RAG context
+        prompt = f"""You are Navigate413, an expert document assistant for UMass Amherst students.
 
-{f"Context from uploaded document:{context}" if context else "No document has been uploaded yet."}
+{f"CURRENT DOCUMENT:{doc_context}" if doc_context else "No document uploaded."}
+{rag_context}
 
-User question: {message}
+QUESTION: {message}
 
-Provide a helpful, concise response (2-3 sentences) that:
-- Answers their question directly
-- Uses plain language (no jargon)
-- Provides actionable advice when applicable
-- Suggests contacting Student Legal Services for legal advice when appropriate
+CRITICAL RULES:
+1. READ THE CLAUSES THOROUGHLY - Extract exact numbers, dates, and terms
+2. BE CONCISE - Answer in 2-3 sentences maximum
+3. BE DIRECT - Start with the answer immediately, no preamble
+4. BE SPECIFIC - Quote exact amounts (e.g., $2,000, not "two thousand dollars")
+5. ONLY answer what was asked - don't add extra information unless critical
+6. If info is missing from clauses, say "Not specified in the document" and stop
+7. Use <b>bold tags</b> for important numbers and terms (NOT markdown asterisks)
 
-Response:"""
+FORMAT: [Direct answer with specifics] [Legal reference if present] [Brief implication if critical]
+
+RESPONSE:"""
         
         # Call Gemini
         model = genai.GenerativeModel(GEMINI_MODEL)

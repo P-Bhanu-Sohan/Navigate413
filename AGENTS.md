@@ -244,7 +244,7 @@ def GlobalRetrievalTool(query_text: str, domain_filter: str = None, campus: str 
         },
         { "$project": { "clause_text": 1, "domain": 1, "risk_metadata": 1, "score": { "$meta": "vectorSearchScore" } } }
     ]
-    return list(clause_embeddings_collection.aggregate(pipeline))
+    return list(embeddings_collection.aggregate(pipeline))
 ```
 
 All six agents import this single function. No agent implements its own retrieval. This prevents drift and ensures consistent embedding behavior.
@@ -295,7 +295,7 @@ This is fully deterministic — no LLM involved. Input params come from either t
 }
 ```
 
-### `clause_embeddings_collection`
+### `Embeddings`
 ```json
 {
   "_id": "ObjectId",
@@ -318,7 +318,7 @@ Pre-seeded at startup. Contains embedded descriptions of: Financial Aid Office, 
 2. **`pdfplumber`** attempts text extraction. If extracted text is < 100 characters (scanned doc), fall back to **`pytesseract`** OCR on page images rendered via `pdf2image`.
 3. Extracted text is stored to `documents_metadata_collection` under `raw_text`.
 4. Text is split into clauses using sentence boundary detection (`nltk.sent_tokenize`) grouped into ~3-sentence chunks.
-5. Each chunk is embedded via `text-embedding-004` and inserted into `clause_embeddings_collection`.
+5. Each chunk is embedded via `text-embedding-004` and inserted into `Embeddings` collection.
 6. `processed_flag` set to `true`. Session ready for `/analyze`.
 
 ---

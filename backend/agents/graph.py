@@ -25,21 +25,31 @@ def build_graph():
     
     # Convert async agents to sync wrappers for LangGraph
     def sync_router(state):
-        return asyncio.run(router_agent(state))
+        print("🔀 [GRAPH] Executing ROUTER agent")
+        result = asyncio.run(router_agent(state))
+        print(f"🔀 [GRAPH] Router classified domain: {result.get('domain', 'unknown')}")
+        return result
     
     def sync_finance(state):
+        print("💰 [GRAPH] Executing FINANCE agent")
         return asyncio.run(finance_agent(state))
     
     def sync_housing(state):
+        print("🏠 [GRAPH] Executing HOUSING agent")
         return asyncio.run(housing_agent(state))
     
     def sync_visa(state):
+        print("✈️ [GRAPH] Executing VISA agent")
         return asyncio.run(visa_agent(state))
     
     def sync_rag(state):
-        return asyncio.run(rag_agent(state))
+        print("🔍 [GRAPH] Executing RAG agent")
+        result = asyncio.run(rag_agent(state))
+        print(f"🔍 [GRAPH] RAG agent retrieved {len(result.get('rag_context', []))} clauses")
+        return result
     
     def sync_risk(state):
+        print("⚠️ [GRAPH] Executing RISK agent")
         return asyncio.run(risk_agent(state))
     
     # Add nodes
@@ -53,6 +63,7 @@ def build_graph():
     # Router determines which specialized agent to call
     def route_to_domain(state):
         domain = state.get("domain", "general")
+        print(f"🔀 [GRAPH] Routing to domain: {domain}")
         if domain == "finance":
             return "finance"
         elif domain == "housing":
@@ -63,7 +74,7 @@ def build_graph():
             return "rag"  # Default to RAG if no specific domain
     
     # Define edges
-    graph.add_edge("START", "router")
+    graph.set_entry_point("router")  # Set router as entry point instead of START edge
     graph.add_conditional_edges("router", route_to_domain)
     graph.add_edge("finance", "rag")
     graph.add_edge("housing", "rag")
@@ -81,6 +92,10 @@ async def run_analysis_workflow(session_id: str, raw_text: str):
     Returns the final state with all agent outputs.
     """
     try:
+        print(f"\n{'='*60}")
+        print(f"🚀 [WORKFLOW] Starting analysis for session: {session_id}")
+        print(f"{'='*60}\n")
+        
         graph = build_graph()
         
         # Initialize state
@@ -97,6 +112,7 @@ async def run_analysis_workflow(session_id: str, raw_text: str):
             risk_assessment=None,
             red_flags=[],
             resources=[],
+            rag_context=[],  # Retrieved clauses from campus_embeddings collection
             translation=None,
             scenario=None,
             error=None
@@ -105,6 +121,9 @@ async def run_analysis_workflow(session_id: str, raw_text: str):
         # Run the workflow
         final_state = await asyncio.to_thread(graph.invoke, initial_state)
         
+        print(f"\n{'='*60}")
+        print(f"✅ [WORKFLOW] Analysis complete for session: {session_id}")
+        print(f"{'='*60}\n")
         logger.info(f"Analysis complete for session {session_id}")
         return final_state
         

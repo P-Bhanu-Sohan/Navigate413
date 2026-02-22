@@ -27,7 +27,7 @@ async def GlobalRetrievalTool(
         List of relevant documents with scores
     """
     try:
-        collection_name = "Embeddings" if collection_type == "clause" else "campus_resources_vector"
+        collection_name = "campus_embeddings" if collection_type == "clause" else "campus_resources_vector"
         
         # Clause embeddings are stored with domain="unknown" at upload time,
         # so domain filtering would eliminate all results — only filter for resources.

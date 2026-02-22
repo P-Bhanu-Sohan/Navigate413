@@ -51,10 +51,10 @@ async def _create_indexes():
         await docs_col.create_index([("user_session_id", ASCENDING)])
         await docs_col.create_index([("upload_timestamp", DESCENDING)])
         
-        # Clause embeddings collection indexes
-        clauses_col = _db["clause_embeddings"]
-        await clauses_col.create_index([("session_id", ASCENDING)])
-        await clauses_col.create_index([("domain", ASCENDING)])
+        # campus_embeddings collection indexes
+        embeddings_col = _db["campus_embeddings"]
+        await embeddings_col.create_index([("session_id", ASCENDING)])
+        await embeddings_col.create_index([("domain", ASCENDING)])
         
         logger.info("MongoDB indexes created successfully")
     except Exception as e:

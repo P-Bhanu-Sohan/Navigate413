@@ -33,7 +33,7 @@ This document tracks the implementation of Navigate413 according to the technica
 
 ### Database Schema
 - ✅ `documents_metadata` collection with indexes
-- ✅ `clause_embeddings` collection with vector indexing
+- ✅ `Embeddings` collection with vector indexing
 - ✅ `campus_resources_vector` collection for semantic search
 
 ## Phase 2: Core Agent Logic ✅ COMPLETE

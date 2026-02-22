@@ -24,6 +24,7 @@ async def analyze_document(request: AnalyzeRequest):
             return AnalyzeResponse(
                 session_id=session_id,
                 domain="unknown",
+                risk_score=0.0,
                 risk_level="LOW",
                 risk_reasoning="Document not found in system.",
                 clauses=[],
@@ -39,6 +40,7 @@ async def analyze_document(request: AnalyzeRequest):
             return AnalyzeResponse(
                 session_id=session_id,
                 domain="unknown",
+                risk_score=0.0,
                 risk_level="LOW",
                 risk_reasoning="Document is still being processed.",
                 clauses=[],
@@ -63,12 +65,19 @@ async def analyze_document(request: AnalyzeRequest):
         resources_raw = final_state.get("resources", [])
         obligations = final_state.get("obligations", [])
         
-        # Extract risk level from assessment text
+        # Extract risk level from assessment text and calculate numeric score
         risk_level = "MEDIUM"  # Default
+        risk_score = 0.5  # Default 50%
+        
         if "high" in risk_assessment.lower():
             risk_level = "HIGH"
+            risk_score = 0.75  # 75% for HIGH
         elif "low" in risk_assessment.lower():
             risk_level = "LOW"
+            risk_score = 0.25  # 25% for LOW
+        else:
+            risk_level = "MEDIUM"
+            risk_score = 0.5  # 50% for MEDIUM
         
         # Build clause objects
         clauses = []
@@ -129,6 +138,7 @@ async def analyze_document(request: AnalyzeRequest):
         return AnalyzeResponse(
             session_id=session_id,
             domain=domain,
+            risk_score=risk_score,
             risk_level=risk_level,
             risk_reasoning=risk_assessment[:500] if risk_assessment else "Analysis complete",
             clauses=clauses,

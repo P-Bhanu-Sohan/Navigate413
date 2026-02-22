@@ -49,7 +49,8 @@ class AnalyzeResponse(BaseModel):
     """Response for document analysis."""
     session_id: str
     domain: str
-    risk_level: str  # LOW, MEDIUM, HIGH (no score)
+    risk_score: float = 0.5  # 0.0 to 1.0 numeric score for frontend gauge
+    risk_level: str  # LOW, MEDIUM, HIGH
     risk_reasoning: str  # Why this level?
     clauses: List[Clause] = []
     obligations: List[str] = []

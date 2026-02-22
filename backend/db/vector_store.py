@@ -42,23 +42,46 @@ async def vector_search(
     query_text: str,
     domain_filter: Optional[str] = None,
     top_k: int = 3,
-    collection_name: str = "Embeddings"
+    collection_name: str = "campus_embeddings"
 ) -> List[Dict[str, Any]]:
-    """Perform vector search against MongoDB Atlas Vector Search."""
+    print(f" [VECTOR_SEARCH] Starting search in: {collection_name}")
+    print(f" [VECTOR_SEARCH] Query: {query_text[:50]}...")
+    logger.info(f"[VECTOR_SEARCH] Starting vector search for collection: {collection_name}")
+    logger.info(f"[VECTOR_SEARCH] Query text: {query_text[:100]}...")
+    logger.info(f"[VECTOR_SEARCH] Domain filter: {domain_filter}, Top K: {top_k}")
+
     try:
+        embedding = await embed_text(query_text, task_type="retrieval_query")
+        print(f" [VECTOR_SEARCH] Generated embedding, dimension: {len(embedding)}")
+        logger.info(f"[VECTOR_SEARCH] Generated embedding for query, dimension: {len(embedding)}")
+
         db = get_db()
         collection = db[collection_name]
         
-        # Generate embedding for query (use retrieval_query task type)
-        query_embedding = await embed_text(query_text, task_type="retrieval_query")
+        # Check how many documents exist in collection
+        doc_count = await collection.count_documents({})
+        print(f" [VECTOR_SEARCH] Collection '{collection_name}' has {doc_count} documents")
+        logger.info(f"[VECTOR_SEARCH] Collection has {doc_count} documents")
+
+        # Determine the correct index name based on the collection
+        if collection_name == "campus_embeddings":
+            index_name = "embedding_index"  # Actual index name in MongoDB Atlas
+        elif collection_name == "campus_resources_vector":
+            index_name = "campus_resource_index"
+        else:
+            logger.error(f"[VECTOR_SEARCH] Unknown collection name: {collection_name}")
+            return []
         
+        print(f" [VECTOR_SEARCH] Using index: {index_name}")
+        logger.info(f"[VECTOR_SEARCH] Using index: {index_name}")
+
         # Build aggregation pipeline with vector search
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "clause_vector_index" if collection_name == "Embeddings" else "campus_resource_index",
+                    "index": index_name,
                     "path": "embedding",
-                    "queryVector": query_embedding,
+                    "queryVector": embedding,
                     "numCandidates": 100,
                     "limit": top_k
                 }
@@ -84,7 +107,13 @@ async def vector_search(
             }
         })
         
-        results = await collection.aggregate(pipeline).to_list(None)
+        results = await collection.aggregate(pipeline).to_list(length=top_k)
+        print(f" [VECTOR_SEARCH] Found {len(results)} results")
+        if len(results) > 0:
+            print(f" [VECTOR_SEARCH] First result score: {results[0].get('score', 'N/A')}")
+        else:
+            print(f" [VECTOR_SEARCH] No results - possible index issue!")
+        logger.info(f"[VECTOR_SEARCH] Search completed successfully, found {len(results)} results")
         return results
     except Exception as e:
         logger.error(f"Vector search failed: {e}")
@@ -100,7 +129,7 @@ async def store_clause_embedding(
     """Store a clause with its embedding."""
     try:
         db = get_db()
-        collection = db["Embeddings"]
+        collection = db["campus_embeddings"]
         
         embedding = await embed_text(clause_text, task_type="retrieval_document")
         

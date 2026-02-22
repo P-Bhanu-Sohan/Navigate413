@@ -147,7 +147,7 @@ React Components: 6
 
 Database Collections: 3
   - documents_metadata
-  - clause_embeddings
+  - Embeddings
   - campus_resources_vector
 
 ================================================================================
@@ -293,7 +293,7 @@ Request Flow:
 Database Flow:
   1. Upload creates documents_metadata entry
   2. Extractor splits text into clauses
-  3. Clauses embedded and stored in clause_embeddings
+  3. Clauses embedded and stored in Embeddings
   4. Analysis queries vector_search for context
   5. Results stored back in documents_metadata
 

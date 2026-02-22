@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     risk_assessment: Optional[str]
     red_flags: List[str]
     resources: List[Dict[str, Any]]
+    rag_context: List[Dict[str, Any]]  # Retrieved clauses from campus_embeddings collection
     translation: Optional[str]
     scenario: Optional[str]
     error: Optional[str]
@@ -87,37 +88,57 @@ async def router_agent(state: AgentState) -> AgentState:
     """
     try:
         text = state.get("raw_text", "")
+        print(f"🔀 [ROUTER] Analyzing document ({len(text)} chars)")
         
-        prompt = f"""You are the Router Agent for document analysis. Analyze this document excerpt and determine:
+        prompt = f"""You are the Router Agent for document analysis. Analyze this document and classify it.
 
-1. What TYPE of document is this? (financial aid, lease agreement, visa requirement, etc.)
-2. What DOMAIN does it belong to? (finance, housing, visa, or multiple)
-3. What is the PRIMARY PURPOSE of this document?
-4. What are the 2-3 most CRITICAL concerns a student should be aware of?
-
-Document:
+Document excerpt:
 {text[:3000]}
 
-Provide your analysis in clear paragraphs. Be specific about the document type and domain."""
+CRITICAL: You MUST end your response with EXACTLY one of these lines:
+DOMAIN: finance
+DOMAIN: housing
+DOMAIN: visa
+DOMAIN: unknown
 
-        analysis = await call_gemini_with_reasoning(prompt, temperature=0.5)
+Classify based on:
+- "finance" if about: financial aid, tuition, scholarships, loans, payment plans, bursar, fees
+- "housing" if about: lease, rent, apartment, dorm, residential, sublease, move-in/out
+- "visa" if about: F-1, J-1, I-20, immigration, work authorization, visa status
+- "unknown" if none of the above
+
+Provide brief analysis, then end with the DOMAIN line."""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.3)
+        print(f"🔀 [ROUTER] Gemini analysis: {analysis[:200]}...")
         
-        # Extract domain from reasoning (simplified)
-        if "finance" in analysis.lower() or "aid" in analysis.lower():
-            state["domain"] = "finance"
-        elif "housing" in analysis.lower() or "lease" in analysis.lower():
-            state["domain"] = "housing"
-        elif "visa" in analysis.lower() or "immigration" in analysis.lower():
-            state["domain"] = "visa"
-        else:
-            state["domain"] = "general"
+        # Extract domain from explicit DOMAIN: line
+        domain = "unknown"
+        for line in analysis.split('\n'):
+            if line.strip().startswith("DOMAIN:"):
+                domain = line.split("DOMAIN:")[1].strip().lower()
+                break
         
-        logger.info(f"Router classified document as: {state['domain']}")
+        # Fallback: keyword matching if DOMAIN line not found
+        if domain == "unknown":
+            analysis_lower = analysis.lower()
+            if any(word in analysis_lower for word in ["financial aid", "tuition", "scholarship", "loan", "bursar", "payment"]):
+                domain = "finance"
+            elif any(word in analysis_lower for word in ["lease", "rent", "housing", "apartment", "residential"]):
+                domain = "housing"
+            elif any(word in analysis_lower for word in ["visa", "f-1", "j-1", "i-20", "immigration"]):
+                domain = "visa"
+        
+        state["domain"] = domain
+        print(f"🔀 [ROUTER] ✓ Classified as: {domain}")
+        logger.info(f"Router classified document as: {domain}")
         return state
         
     except Exception as e:
         logger.error(f"Router agent error: {e}")
+        print(f"🔀 [ROUTER] ✗ Error: {e}")
         state["error"] = str(e)
+        state["domain"] = "unknown"
         return state
 
 
@@ -144,23 +165,43 @@ DOCUMENT TO ANALYZE:
 RELEVANT CONTEXT FROM SIMILAR DOCUMENTS:
 {context}
 
-Analyze the document and:
-1. List ALL financial obligations (tuition, fees, payments, deposits, etc.)
-2. Identify EVERY deadline associated with payments
-3. Find ANY penalties or fees for late/missed payments
-4. Highlight HIDDEN COSTS or unusual financial terms
-5. Explain the FINANCIAL IMPACT if obligations aren't met
+Analyze the document and extract KEY OBLIGATIONS as concise bullet points.
 
-Be thorough and scrutinize every financial detail. Present your findings as clear, actionable insights for a student."""
+OUTPUT FORMAT - Return ONLY a bulleted list of obligations:
+• [Action item with specific amount/deadline]
+• [Action item with specific amount/deadline]
 
-        analysis = await call_gemini_with_reasoning(prompt, temperature=0.7)
+EXAMPLE:
+• Pay $2,000 security deposit by March 1, 2026
+• Maintain 12+ credit hours per semester
+• File FAFSA renewal by April 15, 2026
+
+RULES:
+1. Each bullet point must be a SINGLE, ACTIONABLE item
+2. Include specific amounts, dates, and requirements
+3. Keep each bullet under 15 words
+4. Extract 5-8 most critical obligations only
+5. Do NOT copy full sentences from the document
+6. Do NOT add explanations or context - just the action items
+
+OBLIGATIONS:"""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.3)
         
         state["financial_details"] = analysis
         
-        # Extract obligations as a list (simple line-by-line parsing)
+        # Extract clean bullet points (remove bullet symbols, clean whitespace)
         lines = analysis.split('\n')
-        obligations = [line.strip() for line in lines if line.strip() and len(line) > 20]
-        state["obligations"].extend(obligations[:10])  # Keep top findings
+        obligations = []
+        for line in lines:
+            line = line.strip()
+            # Remove bullet symbols and clean up
+            line = line.lstrip('•●-*').strip()
+            # Only keep lines that are actual obligations (not empty, not too short)
+            if line and len(line) > 10 and not line.endswith(':'):
+                obligations.append(line)
+        
+        state["obligations"].extend(obligations[:8])  # Keep top 8 obligations
         
         return state
         
@@ -231,28 +272,47 @@ async def visa_agent(state: AgentState) -> AgentState:
             top_k=5
         )
         
-        prompt = f"""You are the Visa and Immigration Compliance Agent for international students.
+        prompt = f"""You are the Visa Agent specializing in F-1/J-1 student visa compliance.
 
 DOCUMENT TO ANALYZE:
 {text[:4000]}
 
-RELEVANT COMPLIANCE CONTEXT:
+RELEVANT VISA CONTEXT:
 {context}
 
-Your task:
-1. Extract ALL visa-related requirements (I-20, employment, health insurance, etc.)
-2. Identify COMPLIANCE OBLIGATIONS for F-1/J-1 status maintenance
-3. List STATUS CHANGE NOTIFICATIONS or conditions that could jeopardize visa
-4. Flag any CRITICAL DEADLINES for visa renewals or form submissions
-5. Identify LEGAL RISKS if obligations aren't met
-6. Highlight any unusual provisions that could affect immigration status
+Extract KEY VISA OBLIGATIONS as concise bullet points.
 
-Be comprehensive - missing a compliance obligation could result in visa revocation."""
+OUTPUT FORMAT - Return ONLY a bulleted list:
+• [Specific visa compliance action]
+• [Specific visa compliance action]
 
-        analysis = await call_gemini_with_reasoning(prompt, temperature=0.5)
+EXAMPLE:
+• Maintain full-time enrollment (12+ credits)
+• Report address changes to ISSS within 10 days
+• Renew I-20 before expiration date
+
+RULES:
+1. Each bullet = ONE actionable compliance item
+2. Include specific requirements and deadlines
+3. Keep each bullet under 15 words
+4. Extract 3-6 most critical obligations only
+5. Do NOT copy full document text
+
+VISA OBLIGATIONS:"""
+
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.3)
         
         state["visa_details"] = analysis
-        state["obligations"].append(analysis)
+        
+        # Extract clean bullet points
+        lines = analysis.split('\n')
+        obligations = []
+        for line in lines:
+            line = line.strip().lstrip('•●-*').strip()
+            if line and len(line) > 10 and not line.endswith(':'):
+                obligations.append(line)
+        
+        state["obligations"].extend(obligations[:6])
         
         return state
         
@@ -264,42 +324,105 @@ Be comprehensive - missing a compliance obligation could result in visa revocati
 
 async def rag_agent(state: AgentState) -> AgentState:
     """
-    RAG Agent: Bridges documents to campus resources.
-    Uses reasoning to match student situations with actual support services.
+    RAG Agent: Retrieval-Augmented Generation for document context enrichment.
+    Searches the campus_embeddings collection ONLY to find similar document clauses.
+    Does NOT handle campus resources (that's handled separately by another dev).
     """
+    logger.info("[RAG_AGENT] Starting RAG agent execution")
+    
     try:
+        # Get context from upstream agents
+        raw_text = state.get("raw_text", "")
+        domain = state.get("domain", "general")
         financial_context = state.get("financial_details", "")
         housing_context = state.get("housing_details", "")
         visa_context = state.get("visa_details", "")
         
-        # Determine what resources to search for based on agent findings
+        logger.info(f"[RAG_AGENT] Domain: {domain}")
+        logger.info(f"[RAG_AGENT] Has financial context: {bool(financial_context)}")
+        logger.info(f"[RAG_AGENT] Has housing context: {bool(housing_context)}")
+        logger.info(f"[RAG_AGENT] Has visa context: {bool(visa_context)}")
+        
+        # Build semantic queries based on document content and domain
         search_queries = []
-        if financial_context and "penalty" in financial_context.lower():
-            search_queries.append("financial aid emergency loans bursar")
-        if financial_context and "tuition" in financial_context.lower():
-            search_queries.append("tuition payment plans financial assistance")
-        if housing_context:
-            search_queries.append("housing off-campus residential life")
-        if visa_context:
-            search_queries.append("international students visa immigration")
         
-        resources = []
-        for query in search_queries:
-            context = await get_context_for_agent(
+        # Always search with a snippet from the raw document for similarity
+        if raw_text:
+            # Take first 200 chars as a semantic anchor
+            doc_snippet = raw_text[:200].strip()
+            search_queries.append(doc_snippet)
+            logger.info(f"[RAG_AGENT] Added document snippet query: {doc_snippet[:50]}...")
+        
+        # Add domain-specific semantic queries based on agent findings
+        if domain == "finance" or financial_context:
+            search_queries.append("tuition payment deadline penalty financial obligation fee")
+            logger.info("[RAG_AGENT] Added finance-related query")
+        
+        if domain == "housing" or housing_context:
+            search_queries.append("lease termination move-out penalty deposit liability")
+            logger.info("[RAG_AGENT] Added housing-related query")
+        
+        if domain == "visa" or visa_context:
+            search_queries.append("visa compliance I-20 enrollment status immigration")
+            logger.info("[RAG_AGENT] Added visa-related query")
+        
+        logger.info(f"[RAG_AGENT] Total search queries: {len(search_queries)}")
+        
+        # Search campus_embeddings collection for similar clauses
+        retrieved_clauses = []
+        
+        for i, query in enumerate(search_queries):
+            logger.info(f"[RAG_AGENT] Executing query {i+1}/{len(search_queries)}")
+            
+            # Use GlobalRetrievalTool with collection_type="clause" (campus_embeddings only)
+            results = await GlobalRetrievalTool(
                 query_text=query,
-                top_k=3
+                domain_filter=None,  # No domain filter for clauses
+                top_k=3,
+                collection_type="clause"  # campus_embeddings collection ONLY
             )
-            if context and "No relevant context" not in context:
-                resources.append({
-                    "query": query,
-                    "context": context
-                })
+            
+            logger.info(f"[RAG_AGENT] Query {i+1} returned {len(results)} results")
+            
+            for result in results:
+                clause_text = result.get("clause_text", "")
+                score = result.get("score", 0)
+                
+                if clause_text and clause_text not in [c.get("text") for c in retrieved_clauses]:
+                    retrieved_clauses.append({
+                        "text": clause_text,
+                        "score": score,
+                        "query": query[:50]
+                    })
+                    logger.info(f"[RAG_AGENT] Found clause (score={score:.3f}): {clause_text[:60]}...")
         
-        state["resources"] = resources
+        # Deduplicate and sort by relevance score
+        retrieved_clauses = sorted(
+            retrieved_clauses, 
+            key=lambda x: x.get("score", 0), 
+            reverse=True
+        )[:10]  # Keep top 10 most relevant
+        
+        logger.info(f"[RAG_AGENT] Total unique clauses retrieved: {len(retrieved_clauses)}")
+        
+        # Store retrieved context in state for downstream use
+        state["rag_context"] = retrieved_clauses
+        
+        # Format context for potential use in prompts
+        if retrieved_clauses:
+            context_summary = "\n".join([
+                f"- {c['text'][:150]}... (relevance: {c['score']:.2f})" 
+                for c in retrieved_clauses[:5]
+            ])
+            logger.info(f"[RAG_AGENT] Context summary:\n{context_summary}")
+        else:
+            logger.info("[RAG_AGENT] No similar clauses found in campus_embeddings collection")
+        
+        logger.info("[RAG_AGENT] ✓ RAG agent completed successfully")
         return state
         
     except Exception as e:
-        logger.error(f"RAG agent error: {e}")
+        logger.error(f"[RAG_AGENT] FAILED: {e}", exc_info=True)
         state["error"] = str(e)
         return state
 
