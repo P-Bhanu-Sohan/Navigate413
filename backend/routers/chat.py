@@ -52,13 +52,17 @@ Obligations: {', '.join(risk_output.get('obligations', []))}
 """
                 print(f"💬 [CHAT] Found document context for domain: {domain}")
         
+        # Check if this is a resource-related question
+        resource_keywords = ['resource', 'help', 'office', 'contact', 'where', 'who', 'support', 'assistance', 'services']
+        is_resource_question = any(kw in message.lower() for kw in resource_keywords)
+        
         # RAG: Search campus_embeddings collection for similar clauses
         print(f"💬 [CHAT] Searching campus_embeddings collection for: {message[:50]}...")
         rag_results = await GlobalRetrievalTool(
             query_text=message,
             domain_filter=None,
             top_k=5,
-            collection_type="clause"  # Search campus_embeddings only
+            collection_type="clause"
         )
         
         print(f"💬 [CHAT] RAG retrieved {len(rag_results)} similar clauses")
@@ -72,7 +76,6 @@ Obligations: {', '.join(risk_output.get('obligations', []))}
                 score = result.get("score", 0)
                 risk_metadata = result.get("risk_metadata", {})
                 if clause_text:
-                    # Include FULL clause text, not truncated
                     clause_entry = f"\n[CLAUSE {i}] (Relevance: {score:.2f})\n{clause_text}"
                     if risk_metadata:
                         clause_entry += f"\n[Risk Flag: {risk_metadata.get('flag', 'N/A')}]"
@@ -83,10 +86,31 @@ Obligations: {', '.join(risk_output.get('obligations', []))}
                 rag_context += "".join(rag_clauses)
                 rag_context += "\n=== END CLAUSES ==="
                 print(f"💬 [CHAT] Injected {len(rag_clauses)} FULL clauses into context")
-            else:
-                print(f"💬 [CHAT] No relevant clauses found (empty campus_embeddings collection?)")
-        else:
-            print(f"💬 [CHAT] No RAG results - campus_embeddings collection may be empty")
+        
+        # Add UMass campus resources for resource questions
+        if is_resource_question:
+            print(f"💬 [CHAT] Detected resource question, adding campus resources")
+            rag_context += """
+
+=== UMASS CAMPUS RESOURCES ===
+[HOUSING RESOURCES]
+- Student Legal Services Office (SLSO): Free legal help for lease disputes, tenant rights - https://www.umass.edu/slso - 413-545-1995
+- Off-Campus Student Services: Housing assistance, roommate mediation - https://www.umass.edu/offcampus
+- Residential Life: On-campus housing issues - https://www.umass.edu/living
+
+[FINANCIAL AID RESOURCES]
+- Financial Aid Services: FAFSA help, aid appeals, payment plans - https://www.umass.edu/financialaid - 413-545-0801
+- Bursar's Office: Billing, tuition payments - https://www.umass.edu/bursar
+- Student Financial Strategies: Emergency loans, financial counseling - https://www.umass.edu/financialstrategies
+
+[INTERNATIONAL STUDENT RESOURCES]
+- International Programs Office (IPO): Visa issues, work authorization, SEVIS - https://www.umass.edu/ipo - 413-545-2710
+- International Students & Scholars Services: Immigration advising
+
+[GENERAL SUPPORT]
+- Dean of Students: Academic and personal support - https://www.umass.edu/dean_students
+- Center for Counseling and Psychological Health: Free mental health services - https://www.umass.edu/counseling
+=== END RESOURCES ==="""
         
         # Build enhanced prompt with RAG context
         target_language = request.language if hasattr(request, 'language') else "English"

@@ -375,7 +375,9 @@ async def run_simulation(request: SimulateRequest):
             formula_used=scenario_formula,
             explanation=explanation,
             breakdown=breakdown,
-            caveats=caveats
+            caveats=caveats,
+            severity=severity,
+            is_risk=is_risk
         )
         
     except HTTPException:

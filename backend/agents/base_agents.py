@@ -530,7 +530,7 @@ Think about:
 - What if they take a leave of absence?
 - SAP (Satisfactory Academic Progress) violations?
 
-Output JSON with 3-6 relevant simulations:
+Output ONLY valid JSON with 3-6 relevant simulations. Replace placeholder values with ACTUAL numbers from the document:
 {{
   "simulations": [
     {{
@@ -538,7 +538,7 @@ Output JSON with 3-6 relevant simulations:
       "label": "Credit Hour Reduction Impact",
       "description": "Estimate aid reduction when dropping below full-time",
       "parameters": {{
-        "current_aid": <extract from doc or use 15000>,
+        "current_aid": 15000,
         "current_credits": 15,
         "new_credits": 9,
         "full_time_threshold": 12
@@ -550,8 +550,8 @@ Output JSON with 3-6 relevant simulations:
       "label": "Mid-Semester Withdrawal",
       "description": "Calculate tuition refund and aid return if withdrawing",
       "parameters": {{
-        "tuition_charged": <from doc or 16000>,
-        "aid_disbursed": <from doc or 12000>,
+        "tuition_charged": 16000,
+        "aid_disbursed": 12000,
         "weeks_completed": 4,
         "total_weeks": 15
       }},
@@ -562,41 +562,19 @@ Output JSON with 3-6 relevant simulations:
       "label": "FAFSA Late Filing Impact",
       "description": "Estimate priority aid loss from late FAFSA",
       "parameters": {{
-        "total_aid": <from doc>,
+        "total_aid": 15000,
         "days_late": 30,
-        "state_aid_at_risk": <from doc or 2000>,
-        "institutional_aid_at_risk": <from doc or 3000>
+        "state_aid_at_risk": 2000,
+        "institutional_aid_at_risk": 3000
       }},
       "formula": "Priority deadline aid loss estimation"
-    }},
-    {{
-      "scenario_type": "part_time_switch",
-      "label": "Full-Time to Part-Time Impact",
-      "description": "Aid changes when switching to part-time enrollment",
-      "parameters": {{
-        "current_grants": <from doc>,
-        "current_loans": <from doc>,
-        "new_enrollment_status": 0.5
-      }},
-      "formula": "Adjusted aid based on enrollment status"
-    }},
-    {{
-      "scenario_type": "gpa_drop_impact",
-      "label": "GPA Drop / SAP Violation Risk",
-      "description": "Aid loss risk if GPA falls below requirements",
-      "parameters": {{
-        "current_gpa": 2.5,
-        "required_gpa": 2.0,
-        "total_aid_at_risk": <from doc>
-      }},
-      "formula": "SAP violation consequences assessment"
     }},
     {{
       "scenario_type": "loan_repayment_estimate",
       "label": "Monthly Loan Repayment",
       "description": "Estimate monthly payments after graduation",
       "parameters": {{
-        "total_loan_amount": <from doc or 10000>,
+        "total_loan_amount": 10000,
         "interest_rate": 5.5,
         "repayment_years": 10
       }},

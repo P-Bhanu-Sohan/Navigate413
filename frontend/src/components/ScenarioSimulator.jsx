@@ -106,7 +106,11 @@ export function ScenarioSimulator({ sessionId, domain, availableSimulations = []
   };
 
   // Determine if result is a risk score (0-100) or dollar amount
-  const isRiskScore = selectedScenario?.includes('violation') || selectedScenario?.includes('drop');
+  // Use backend's is_risk flag if available, otherwise infer from value
+  // Risk scores are 0-100, anything over 100 is definitely a dollar amount
+  const isRiskScore = result?.is_risk !== undefined 
+    ? result.is_risk 
+    : (result?.exposure_estimate <= 100);
 
   return (
     <div className="bg-slate-800 border border-slate-700 rounded-xl p-8">
@@ -218,19 +222,28 @@ export function ScenarioSimulator({ sessionId, domain, availableSimulations = []
           </div>
           
           <p className={`text-3xl font-bold mb-3 ${
-            isRiskScore 
-              ? result.exposure_estimate > 50 
-                ? 'text-red-400' 
-                : result.exposure_estimate > 20 
-                  ? 'text-yellow-400' 
-                  : 'text-green-400'
-              : 'text-purple-300'
+            result.severity === 'CRITICAL' || result.severity === 'HIGH'
+              ? 'text-red-400'
+              : result.severity === 'MODERATE'
+                ? 'text-yellow-400'
+                : result.severity === 'LOW' || result.severity === 'NONE'
+                  ? 'text-green-400'
+                  : 'text-purple-300'
           }`}>
-            {isRiskScore 
-              ? `${result.exposure_estimate.toFixed(0)}% Risk`
-              : `$${result.exposure_estimate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            {/* Show severity word + dollar amount if applicable */}
+            {result.severity && result.severity !== 'UNKNOWN' 
+              ? `${result.severity.charAt(0) + result.severity.slice(1).toLowerCase()} Risk`
+              : result.exposure_estimate <= 100 
+                ? `${result.exposure_estimate.toFixed(0)}% Risk`
+                : `$${result.exposure_estimate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
             }
           </p>
+          {/* Show dollar amount separately if it's meaningful */}
+          {result.exposure_estimate > 0 && result.severity && result.severity !== 'UNKNOWN' && (
+            <p className="text-lg text-slate-400 mb-2">
+              ${result.exposure_estimate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} at stake
+            </p>
+          )}
           
           <p className="text-slate-300 text-sm">
             {result.explanation}

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { FileText, AlertTriangle, Headphones, Send, Menu, X } from 'lucide-react';
 import { UploadZone } from '../components/UploadZone';
 import { RiskScoreCard } from '../components/RiskScoreCard';
-import { ClauseBreakdown } from '../components/ClauseBreakdown';
 import { ScenarioSimulator } from '../components/ScenarioSimulator';
 import { ChatWindow } from '../components/ChatWindow';
 
@@ -202,10 +201,6 @@ export function Dashboard() {
                     summary={analysis.summary}
                   />
 
-                  {/* Clauses */}
-                  {analysis.clauses && analysis.clauses.length > 0 && (
-                    <ClauseBreakdown clauses={analysis.clauses} />
-                  )}
 
                   {/* Scenario Simulator */}
                   <ScenarioSimulator 

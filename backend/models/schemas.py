@@ -100,6 +100,8 @@ class SimulateResponse(BaseModel):
     explanation: str
     breakdown: Dict[str, Any] = {}  # Show calculation steps
     caveats: List[str] = []
+    severity: str = "UNKNOWN"  # NONE, LOW, MODERATE, HIGH, CRITICAL
+    is_risk: bool = False  # True if this is a risk assessment (0-100), False if dollar amount
 
 
 class ResourceQueryResponse(BaseModel):
