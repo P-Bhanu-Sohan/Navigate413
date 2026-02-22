@@ -5,8 +5,8 @@ load_dotenv()
 
 # Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = "gemini-1.5-flash"
-GEMINI_EMBEDDING_MODEL = "text-embedding-004"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
 
 # MongoDB Atlas
 MONGODB_URI = os.getenv("MONGODB_URI")

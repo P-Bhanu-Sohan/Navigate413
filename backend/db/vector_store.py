@@ -1,23 +1,38 @@
+import asyncio
 import logging
+from datetime import datetime
 from typing import Optional, List, Dict, Any
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 from config import GEMINI_EMBEDDING_MODEL, GEMINI_API_KEY
 from db.mongo import get_db
 
 logger = logging.getLogger(__name__)
 
-# Configure Gemini
-genai.configure(api_key=GEMINI_API_KEY)
+# New google-genai client (uses v1 API — required for text-embedding-004)
+_genai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-async def embed_text(text: str) -> List[float]:
-    """Generate embedding for text using Gemini."""
+def _embed_text_sync(text: str, task_type: str) -> List[float]:
+    """Synchronous Gemini embedding call (run in a thread pool)."""
+    response = _genai_client.models.embed_content(
+        model=GEMINI_EMBEDDING_MODEL,
+        contents=text,
+        config=genai_types.EmbedContentConfig(task_type=task_type),
+    )
+    return response.embeddings[0].values
+
+
+async def embed_text(text: str, task_type: str = "retrieval_document") -> List[float]:
+    """Generate a 768-dim embedding for text using Gemini text-embedding-004.
+
+    Uses asyncio.to_thread so the synchronous genai call does not block
+    the event loop.  task_type should be:
+      - "retrieval_document" when indexing document clauses
+      - "retrieval_query"    when embedding a search query
+    """
     try:
-        result = genai.embed_content(
-            model=GEMINI_EMBEDDING_MODEL,
-            content=text
-        )
-        return result['embedding']
+        return await asyncio.to_thread(_embed_text_sync, text, task_type)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
         raise
@@ -27,21 +42,21 @@ async def vector_search(
     query_text: str,
     domain_filter: Optional[str] = None,
     top_k: int = 3,
-    collection_name: str = "clause_embeddings"
+    collection_name: str = "Embeddings"
 ) -> List[Dict[str, Any]]:
     """Perform vector search against MongoDB Atlas Vector Search."""
     try:
         db = get_db()
         collection = db[collection_name]
         
-        # Generate embedding for query
-        query_embedding = await embed_text(query_text)
+        # Generate embedding for query (use retrieval_query task type)
+        query_embedding = await embed_text(query_text, task_type="retrieval_query")
         
         # Build aggregation pipeline with vector search
         pipeline = [
             {
                 "$vectorSearch": {
-                    "index": "clause_vector_index" if collection_name == "clause_embeddings" else "campus_resource_index",
+                    "index": "clause_vector_index" if collection_name == "Embeddings" else "campus_resource_index",
                     "path": "embedding",
                     "queryVector": query_embedding,
                     "numCandidates": 100,
@@ -85,16 +100,17 @@ async def store_clause_embedding(
     """Store a clause with its embedding."""
     try:
         db = get_db()
-        collection = db["clause_embeddings"]
+        collection = db["Embeddings"]
         
-        embedding = await embed_text(clause_text)
+        embedding = await embed_text(clause_text, task_type="retrieval_document")
         
         doc = {
             "session_id": session_id,
             "clause_text": clause_text,
             "embedding": embedding,
             "domain": domain,
-            "risk_metadata": risk_metadata or {}
+            "risk_metadata": risk_metadata or {},
+            "created_at": datetime.utcnow(),
         }
         
         result = await collection.insert_one(doc)
@@ -157,8 +173,12 @@ async def seed_campus_resources():
         
         # Embed and insert
         for resource in resources:
-            embedding = await embed_text(f"{resource['resource_name']} {resource['description']}")
+            embedding = await embed_text(
+                f"{resource['resource_name']} {resource['description']}",
+                task_type="retrieval_document",
+            )
             resource["embedding"] = embedding
+            resource["created_at"] = datetime.utcnow()
             await collection.insert_one(resource)
         
         logger.info(f"Seeded {len(resources)} campus resources")

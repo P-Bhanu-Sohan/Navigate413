@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter
-from models.schemas import AnalyzeResponse, Clause, Resource, RedFlag
+from models.schemas import AnalyzeRequest, AnalyzeResponse, Clause, Resource, RedFlag
 from db.mongo import get_db
 from agents.graph import run_analysis_workflow
 from agents.base_agents import AgentState
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api", tags=["analyze"])
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_document(request):
+async def analyze_document(request: AnalyzeRequest):
     """Analyze document using reasoning-based agents."""
     try:
         db = get_db()
