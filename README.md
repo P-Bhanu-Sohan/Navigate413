@@ -1,4 +1,4 @@
-# Navigate413
+## Navigate413
 
 ## Inspiration
 The concept for **Navigate413** was born from a common struggle: the overwhelming density of university-related documents like financial aid letters, housing leases, and institutional notices. These documents are often written in complex legal or institutional language that is difficult for students to interpret accurately. This barrier frequently leads to missed deadlines, misunderstood obligations, and significant stress. 
