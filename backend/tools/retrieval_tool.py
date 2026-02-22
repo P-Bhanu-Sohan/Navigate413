@@ -27,8 +27,13 @@ async def GlobalRetrievalTool(
         List of relevant documents with scores
     """
     try:
-        collection_name = "clause_embeddings" if collection_type == "clause" else "campus_resources_vector"
+        logger.info(f"[GLOBAL_RETRIEVAL] Called with collection_type={collection_type}, domain_filter={domain_filter}, top_k={top_k}")
+        logger.info(f"[GLOBAL_RETRIEVAL] Query text: {query_text[:100]}...")
         
+        collection_name = "Embeddings" if collection_type == "clause" else "campus_resources_vector"
+        logger.info(f"[GLOBAL_RETRIEVAL] Using collection: {collection_name}")
+        
+        logger.info(f"[GLOBAL_RETRIEVAL] Calling vector_search...")
         results = await vector_search(
             query_text=query_text,
             domain_filter=domain_filter,
@@ -36,8 +41,10 @@ async def GlobalRetrievalTool(
             collection_name=collection_name
         )
         
-        logger.info(f"GlobalRetrievalTool returned {len(results)} results for query")
+        logger.info(f"[GLOBAL_RETRIEVAL] ✓ Returned {len(results)} results")
+        for i, result in enumerate(results):
+            logger.info(f"[GLOBAL_RETRIEVAL] Result {i+1}: {result.get('clause_text', result.get('resource_name', 'N/A'))[:50]}...")
         return results
     except Exception as e:
-        logger.error(f"GlobalRetrievalTool error: {e}")
+        logger.error(f"[GLOBAL_RETRIEVAL] FAILED: {e}", exc_info=True)
         return []
