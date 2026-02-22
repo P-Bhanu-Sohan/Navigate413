@@ -8,7 +8,8 @@ from agents.base_agents import (
     housing_agent,
     visa_agent,
     rag_agent,
-    risk_agent
+    risk_agent,
+    simulation_agent
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,12 @@ def build_graph():
         print("⚠️ [GRAPH] Executing RISK agent")
         return asyncio.run(risk_agent(state))
     
+    def sync_simulation(state):
+        print("🎲 [GRAPH] Executing SIMULATION agent")
+        result = asyncio.run(simulation_agent(state))
+        print(f"🎲 [GRAPH] Extracted {len(result.get('simulation_options', []))} simulations")
+        return result
+    
     # Add nodes
     graph.add_node("router", sync_router)
     graph.add_node("finance", sync_finance)
@@ -59,6 +66,7 @@ def build_graph():
     graph.add_node("visa", sync_visa)
     graph.add_node("rag", sync_rag)
     graph.add_node("risk", sync_risk)
+    graph.add_node("simulation", sync_simulation)
     
     # Router determines which specialized agent to call
     def route_to_domain(state):
@@ -80,7 +88,8 @@ def build_graph():
     graph.add_edge("housing", "rag")
     graph.add_edge("visa", "rag")
     graph.add_edge("rag", "risk")
-    graph.add_edge("risk", END)
+    graph.add_edge("risk", "simulation")
+    graph.add_edge("simulation", END)
     
     return graph.compile()
 
@@ -115,6 +124,7 @@ async def run_analysis_workflow(session_id: str, raw_text: str):
             rag_context=[],  # Retrieved clauses from campus_embeddings collection
             translation=None,
             scenario=None,
+            simulation_options=[],  # Dynamic simulations extracted from document
             error=None
         )
         

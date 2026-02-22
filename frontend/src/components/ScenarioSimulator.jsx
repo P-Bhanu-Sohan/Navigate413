@@ -1,139 +1,240 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Calculator, Play, AlertCircle, TrendingUp } from 'lucide-react';
 
-export function ScenarioSimulator({ sessionId, domain }) {
-  const [scenario, setScenario] = useState('early_termination');
-  const [parameters, setParameters] = useState({
-    months_remaining: 8,
-    penalty_rate_per_month: 250,
-    base_penalty: 500
-  });
+export function ScenarioSimulator({ sessionId, domain, availableSimulations = [] }) {
+  const [selectedScenario, setSelectedScenario] = useState(null);
+  const [parameters, setParameters] = useState({});
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  console.log('🎲 [ScenarioSimulator] Render - Props received:');
+  console.log('🎲 [ScenarioSimulator]   sessionId:', sessionId);
+  console.log('🎲 [ScenarioSimulator]   domain:', domain);
+  console.log('🎲 [ScenarioSimulator]   availableSimulations:', availableSimulations);
+  console.log('🎲 [ScenarioSimulator]   availableSimulations count:', availableSimulations?.length || 0);
+
+  // Set initial scenario when availableSimulations changes
+  useEffect(() => {
+    console.log('🎲 [ScenarioSimulator] useEffect triggered - availableSimulations changed');
+    if (availableSimulations.length > 0 && !selectedScenario) {
+      const firstSim = availableSimulations[0];
+      console.log('🎲 [ScenarioSimulator] Setting initial scenario:', firstSim.scenario_type);
+      console.log('🎲 [ScenarioSimulator] Setting initial parameters:', firstSim.parameters);
+      setSelectedScenario(firstSim.scenario_type);
+      setParameters(firstSim.parameters || {});
+    }
+  }, [availableSimulations, selectedScenario]);
+
+  // Update parameters when scenario changes
+  const handleScenarioChange = (scenarioType) => {
+    console.log('🎲 [ScenarioSimulator] Scenario changed to:', scenarioType);
+    setSelectedScenario(scenarioType);
+    setResult(null);
+    const sim = availableSimulations.find(s => s.scenario_type === scenarioType);
+    if (sim) {
+      console.log('🎲 [ScenarioSimulator] Loading parameters for scenario:', sim.parameters);
+      setParameters(sim.parameters || {});
+    }
+  };
+
   const handleParameterChange = (key, value) => {
+    console.log('🎲 [ScenarioSimulator] Parameter changed:', key, '=', value);
     setParameters(prev => ({
       ...prev,
-      [key]: parseFloat(value) || 0
+      [key]: key === 'has_rpe_approval' ? value === 'true' : (parseFloat(value) || 0)
     }));
   };
 
   const handleSimulate = async () => {
+    if (!selectedScenario) return;
+    
+    console.log('🎲 [ScenarioSimulator] ========================================');
+    console.log('🎲 [ScenarioSimulator] RUN SIMULATION clicked');
+    console.log('🎲 [ScenarioSimulator] Scenario:', selectedScenario);
+    console.log('🎲 [ScenarioSimulator] Parameters:', parameters);
+    console.log('🎲 [ScenarioSimulator] ========================================');
+    
     setLoading(true);
     setError(null);
     
     try {
+      const requestBody = {
+        session_id: sessionId,
+        scenario_type: selectedScenario,
+        parameters
+      };
+      console.log('🎲 [ScenarioSimulator] Sending POST /api/simulate with body:', requestBody);
+      
       const response = await fetch('/api/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: sessionId,
-          scenario,
-          parameters
-        })
+        body: JSON.stringify(requestBody)
       });
 
+      console.log('🎲 [ScenarioSimulator] Response status:', response.status);
+
       if (!response.ok) {
-        throw new Error('Simulation failed');
+        const errorData = await response.json().catch(() => ({}));
+        console.log('🎲 [ScenarioSimulator] ❌ Error response:', errorData);
+        throw new Error(errorData.detail || 'Simulation failed');
       }
 
       const data = await response.json();
+      console.log('🎲 [ScenarioSimulator] ✅ Success! Response:', data);
       setResult(data);
     } catch (err) {
+      console.log('🎲 [ScenarioSimulator] ❌ Exception:', err.message);
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  if (domain !== 'housing' && domain !== 'finance') {
+  // Don't render if no simulations available
+  if (!availableSimulations || availableSimulations.length === 0) {
     return null;
   }
 
+  const currentSimulation = availableSimulations.find(s => s.scenario_type === selectedScenario);
+
+  // Format parameter name for display
+  const formatParamName = (key) => {
+    return key
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, l => l.toUpperCase());
+  };
+
+  // Determine if result is a risk score (0-100) or dollar amount
+  const isRiskScore = selectedScenario?.includes('violation') || selectedScenario?.includes('drop');
+
   return (
-    <div className="card">
-      <h3 className="text-xl font-bold mb-4">Scenario Simulator</h3>
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-8">
+      <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-3">
+        <div className="w-8 h-8 bg-purple-500/10 rounded-lg flex items-center justify-center">
+          <Calculator className="w-5 h-5 text-purple-400" />
+        </div>
+        Scenario Simulator
+      </h3>
       
-      <div className="mb-4">
-        <label className="block text-sm font-medium text-gray-700 mb-2">
-          Scenario Type
+      <p className="text-slate-400 text-sm mb-6">
+        Run "what-if" simulations based on your document. Values are pre-filled from document analysis.
+      </p>
+      
+      {/* Scenario Selection */}
+      <div className="mb-6">
+        <label className="block text-sm font-medium text-slate-300 mb-2">
+          Select Scenario
         </label>
         <select
-          value={scenario}
-          onChange={(e) => setScenario(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring focus:ring-blue-200"
+          value={selectedScenario || ''}
+          onChange={(e) => handleScenarioChange(e.target.value)}
+          className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
         >
-          <option value="early_termination">Early Lease Termination</option>
-          <option value="enrollment_change">Enrollment Change</option>
+          {availableSimulations.map((sim) => (
+            <option key={sim.scenario_type} value={sim.scenario_type}>
+              {sim.label}
+            </option>
+          ))}
         </select>
+        {currentSimulation && (
+          <p className="text-slate-500 text-xs mt-2">{currentSimulation.description}</p>
+        )}
       </div>
 
-      <div className="space-y-3 mb-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Base Penalty ($)
-          </label>
-          <input
-            type="number"
-            value={parameters.base_penalty}
-            onChange={(e) => handleParameterChange('base_penalty', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring focus:ring-blue-200"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Penalty per Month ($)
-          </label>
-          <input
-            type="number"
-            value={parameters.penalty_rate_per_month}
-            onChange={(e) => handleParameterChange('penalty_rate_per_month', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring focus:ring-blue-200"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Months Remaining
-          </label>
-          <input
-            type="number"
-            value={parameters.months_remaining}
-            onChange={(e) => handleParameterChange('months_remaining', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring focus:ring-blue-200"
-          />
-        </div>
-      </div>
-
-      <button
-        onClick={handleSimulate}
-        disabled={loading}
-        className="btn-primary w-full mb-4"
-      >
-        {loading ? 'Running simulation...' : 'Run Simulation'}
-      </button>
-
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm mb-4">
-          {error}
+      {/* Dynamic Parameter Inputs */}
+      {currentSimulation && (
+        <div className="space-y-4 mb-6">
+          <p className="text-sm text-slate-400 font-medium">Adjust Parameters:</p>
+          {Object.entries(parameters).map(([key, value]) => (
+            <div key={key}>
+              <label className="block text-sm font-medium text-slate-300 mb-1">
+                {formatParamName(key)}
+              </label>
+              {key === 'has_rpe_approval' ? (
+                <select
+                  value={value.toString()}
+                  onChange={(e) => handleParameterChange(key, e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="false">No</option>
+                  <option value="true">Yes</option>
+                </select>
+              ) : (
+                <input
+                  type="number"
+                  value={value}
+                  onChange={(e) => handleParameterChange(key, e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+              )}
+            </div>
+          ))}
         </div>
       )}
 
+      {/* Formula Display */}
+      {currentSimulation && (
+        <div className="bg-slate-700/50 rounded-lg p-3 mb-6">
+          <p className="text-xs text-slate-400">
+            <strong className="text-slate-300">Formula:</strong> {currentSimulation.formula}
+          </p>
+        </div>
+      )}
+
+      {/* Run Button */}
+      <button
+        onClick={handleSimulate}
+        disabled={loading || !selectedScenario}
+        className="w-full py-3 px-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-slate-600 disabled:to-slate-600 text-white font-semibold rounded-lg transition-all flex items-center justify-center gap-2"
+      >
+        {loading ? (
+          <>
+            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+            Running Simulation...
+          </>
+        ) : (
+          <>
+            <Play className="w-4 h-4" />
+            Run Simulation
+          </>
+        )}
+      </button>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mt-4 p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-red-300 text-sm">{error}</p>
+        </div>
+      )}
+
+      {/* Result Display */}
       {result && (
-        <div className="p-4 bg-blue-50 border border-blue-200 rounded">
-          <p className="text-2xl font-bold text-blue-900 mb-2">
-            ${result.exposure_estimate.toFixed(2)}
+        <div className="mt-6 p-6 bg-slate-700 border border-slate-600 rounded-xl">
+          <div className="flex items-center gap-3 mb-4">
+            <TrendingUp className="w-6 h-6 text-purple-400" />
+            <span className="text-sm text-slate-400">{result.scenario_label}</span>
+          </div>
+          
+          <p className={`text-3xl font-bold mb-3 ${
+            isRiskScore 
+              ? result.exposure_estimate > 50 
+                ? 'text-red-400' 
+                : result.exposure_estimate > 20 
+                  ? 'text-yellow-400' 
+                  : 'text-green-400'
+              : 'text-purple-300'
+          }`}>
+            {isRiskScore 
+              ? `${result.exposure_estimate.toFixed(0)}% Risk`
+              : `$${result.exposure_estimate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            }
           </p>
-          <p className="text-sm text-gray-600 mb-3">
-            <strong>Formula:</strong> {result.formula_used}
-          </p>
-          <p className="text-sm text-gray-700 mb-3">
+          
+          <p className="text-slate-300 text-sm">
             {result.explanation}
           </p>
-          {result.caveats && result.caveats.length > 0 && (
-            <div className="text-xs text-gray-600 bg-white p-2 rounded border border-blue-100">
-              <strong>Important:</strong> {result.caveats.join(' ')}
-            </div>
-          )}
         </div>
       )}
     </div>

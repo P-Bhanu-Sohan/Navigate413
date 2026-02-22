@@ -1,6 +1,6 @@
 import logging
 from fastapi import APIRouter
-from models.schemas import AnalyzeRequest, AnalyzeResponse, Clause, Resource, RedFlag
+from models.schemas import AnalyzeRequest, AnalyzeResponse, Clause, Resource, RedFlag, SimulationOption
 from db.mongo import get_db
 from agents.graph import run_analysis_workflow
 from agents.base_agents import AgentState
@@ -119,6 +119,29 @@ async def analyze_document(request: AnalyzeRequest):
             recommendations.append("Ensure full compliance with all requirements")
         recommendations.append("Ask questions about any unclear terms")
         
+        # Extract simulation options from final state (populated by simulation_agent)
+        print(f"\n📊 [ANALYZE API] Extracting simulation options from final state...")
+        simulation_options_raw = final_state.get("simulation_options", [])
+        print(f"📊 [ANALYZE API] Raw simulation_options count: {len(simulation_options_raw)}")
+        print(f"📊 [ANALYZE API] Raw simulation_options: {simulation_options_raw}")
+        
+        available_simulations = []
+        for sim in simulation_options_raw:
+            try:
+                available_simulations.append(SimulationOption(
+                    scenario_type=sim.get("scenario_type", ""),
+                    label=sim.get("label", ""),
+                    description=sim.get("description", ""),
+                    parameters=sim.get("parameters", {}),
+                    formula=sim.get("formula", "")
+                ))
+                print(f"📊 [ANALYZE API] ✓ Added simulation: {sim.get('scenario_type')} - {sim.get('label')}")
+            except Exception as e:
+                print(f"📊 [ANALYZE API] ✗ Failed to parse simulation: {e}")
+                logger.warning(f"Failed to parse simulation option: {e}")
+        
+        print(f"📊 [ANALYZE API] ✅ Total available_simulations: {len(available_simulations)}")
+        
         # Store analysis result
         await db["documents_metadata"].update_one(
             {"_id": session_id},
@@ -129,7 +152,8 @@ async def analyze_document(request: AnalyzeRequest):
                         "risk_assessment": risk_assessment,
                         "risk_level": risk_level,
                         "red_flags": red_flags_raw,
-                        "obligations": obligations
+                        "obligations": obligations,
+                        "simulation_options": simulation_options_raw
                     }
                 }
             }
@@ -140,14 +164,15 @@ async def analyze_document(request: AnalyzeRequest):
             domain=domain,
             risk_score=risk_score,
             risk_level=risk_level,
-            risk_reasoning=risk_assessment[:500] if risk_assessment else "Analysis complete",
+            risk_reasoning=risk_assessment if risk_assessment else "Analysis complete",
             clauses=clauses,
             obligations=obligations,
             deadlines=[],  # Extracted from obligations if available
             red_flags=red_flags,
             resources=resources,
-            summary=risk_assessment[:200] if risk_assessment else "Document analyzed.",
-            recommendations=recommendations
+            summary=risk_assessment if risk_assessment else "Document analyzed.",
+            recommendations=recommendations,
+            available_simulations=available_simulations
         )
     except Exception as e:
         logger.error(f"Analysis error: {e}")

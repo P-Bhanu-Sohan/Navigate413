@@ -100,44 +100,52 @@ export function UploadZone({ onUploadComplete }) {
     poll();
   };
 
+  const handleBoxClick = () => {
+    if (!uploading) {
+      document.getElementById('file-upload-input').click();
+    }
+  };
+
   return (
     <div className="h-full flex flex-col">
       <div
-        className={`flex-1 border-2 border-dashed rounded-xl p-8 text-center transition ${
+        className={`flex-1 border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300 cursor-pointer ${
           isDragActive
-            ? 'border-crimson-400 bg-crimson-500/5'
-            : 'border-slate-600 bg-slate-700/50 hover:border-slate-500'
+            ? 'border-crimson-400 bg-crimson-500/10 scale-[1.01]'
+            : 'border-slate-500 bg-slate-700/50 hover:border-crimson-400/60 hover:bg-slate-700/70 hover:scale-[1.005]'
         }`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
         onDragOver={handleDrag}
         onDrop={handleDrop}
+        onClick={handleBoxClick}
       >
         <div className="mb-4 flex justify-center">
           <div className={`p-3 rounded-lg transition ${isDragActive ? 'bg-crimson-500/20' : 'bg-slate-600/50'}`}>
             <Upload className={`w-8 h-8 transition ${isDragActive ? 'text-crimson-400' : 'text-slate-400'}`} />
           </div>
         </div>
-        <p className="text-lg font-semibold text-slate-100 mb-2">
+        <p className="text-xl font-semibold text-slate-100 mb-3">
           Drop your PDF here
         </p>
-        <p className="text-sm text-slate-400 mb-4">
+        <p className="text-base text-slate-300 mb-4">
           Financial aid letters, lease agreements, visa documents
         </p>
-        <p className="text-sm text-slate-500 mb-6">
+        <p className="text-base text-slate-400 mb-6">
           or{' '}
-          <label className="text-crimson-400 hover:text-crimson-300 font-medium cursor-pointer">
+          <span className="text-crimson-400 hover:text-crimson-300 font-medium underline underline-offset-2">
             browse to select
-            <input
-              type="file"
-              className="hidden"
-              onChange={handleFileChange}
-              accept=".pdf"
-              disabled={uploading}
-            />
-          </label>
+          </span>
+          <input
+            id="file-upload-input"
+            type="file"
+            className="hidden"
+            onChange={handleFileChange}
+            accept=".pdf"
+            disabled={uploading}
+          />
         </p>
-        <p className="text-xs text-slate-500">Maximum 50MB</p>
+        <p className="text-sm text-slate-400">Maximum 50MB</p>
 
         {uploading && (
           <div className="mt-6 space-y-3">

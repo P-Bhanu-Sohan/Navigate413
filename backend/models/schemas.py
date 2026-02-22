@@ -45,6 +45,15 @@ class Resource(BaseModel):
     description: Optional[str] = None
 
 
+class SimulationOption(BaseModel):
+    """A simulation option extracted from document analysis."""
+    scenario_type: str  # e.g., "early_termination", "credit_reduction"
+    label: str  # Human-readable label
+    description: str  # What this simulation calculates
+    parameters: Dict[str, Any]  # Default values extracted from document
+    formula: str  # The formula used
+
+
 class AnalyzeResponse(BaseModel):
     """Response for document analysis."""
     session_id: str
@@ -59,6 +68,7 @@ class AnalyzeResponse(BaseModel):
     resources: List[Resource] = []
     summary: str
     recommendations: List[str] = []
+    available_simulations: List[SimulationOption] = []  # Dynamic simulations based on document
 
 
 class TranslateRequest(BaseModel):
@@ -74,18 +84,21 @@ class TranslateResponse(BaseModel):
     context_note: str = "Student-friendly explanation translated from English."
 
 
-class ScenarioRequest(BaseModel):
+class SimulateRequest(BaseModel):
     """Request for scenario simulation."""
     session_id: str
-    scenario_description: str
+    scenario_type: str  # e.g., "early_termination", "credit_reduction"
+    parameters: Dict[str, Any]  # User-provided or default values (can include booleans)
 
 
-class ScenarioResponse(BaseModel):
+class SimulateResponse(BaseModel):
     """Response for scenario simulation."""
-    scenario: str
-    what_happens: str  # Plain language explanation
-    implications: List[str]
-    suggested_steps: List[str]
+    scenario_type: str
+    scenario_label: str
+    exposure_estimate: float
+    formula_used: str
+    explanation: str
+    breakdown: Dict[str, Any] = {}  # Show calculation steps
     caveats: List[str] = []
 
 

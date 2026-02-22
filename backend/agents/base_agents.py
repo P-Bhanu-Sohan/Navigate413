@@ -27,6 +27,7 @@ class AgentState(TypedDict):
     rag_context: List[Dict[str, Any]]  # Retrieved clauses from campus_embeddings collection
     translation: Optional[str]
     scenario: Optional[str]
+    simulation_options: List[Dict[str, Any]]  # Dynamic simulations extracted from document
     error: Optional[str]
 
 
@@ -427,6 +428,287 @@ async def rag_agent(state: AgentState) -> AgentState:
         return state
 
 
+async def simulation_agent(state: AgentState) -> AgentState:
+    """
+    Simulation Agent: Extracts simulation parameters from document using Gemini.
+    Identifies what-if scenarios relevant to the document and extracts numeric values.
+    """
+    try:
+        print(f"\n{'='*60}")
+        print(f"🎲 [SIMULATION_AGENT] Starting simulation extraction...")
+        print(f"{'='*60}")
+        
+        text = state.get("raw_text", "")
+        domain = state.get("domain", "unknown")
+        financial = state.get("financial_details", "")
+        housing = state.get("housing_details", "")
+        visa = state.get("visa_details", "")
+        
+        print(f"🎲 [SIMULATION_AGENT] Domain: {domain}")
+        print(f"🎲 [SIMULATION_AGENT] Raw text length: {len(text)} chars")
+        print(f"🎲 [SIMULATION_AGENT] Has financial details: {bool(financial)}")
+        print(f"🎲 [SIMULATION_AGENT] Has housing details: {bool(housing)}")
+        print(f"🎲 [SIMULATION_AGENT] Has visa details: {bool(visa)}")
+        
+        logger.info(f"[SIMULATION_AGENT] Extracting simulations for domain: {domain}")
+        
+        # Build domain-specific prompt
+        if domain == "housing":
+            prompt = f"""Analyze this housing/lease document and extract simulation parameters.
+
+DOCUMENT:
+{text[:3000]}
+
+HOUSING ANALYSIS:
+{housing[:1000] if housing else "N/A"}
+
+Extract ONLY if found in document. Output JSON format:
+{{
+  "simulations": [
+    {{
+      "scenario_type": "early_termination",
+      "label": "Early Lease Termination",
+      "description": "Calculate cost of breaking lease early",
+      "parameters": {{
+        "base_penalty": <number or 0>,
+        "monthly_penalty": <number or 0>,
+        "months_remaining": <number or 6>
+      }},
+      "formula": "base_penalty + (months_remaining × monthly_penalty)"
+    }},
+    {{
+      "scenario_type": "late_rent",
+      "label": "Late Rent Payment",
+      "description": "Calculate late rent fees",
+      "parameters": {{
+        "monthly_rent": <number or 0>,
+        "late_fee_percent": <number or 5>,
+        "daily_fee": <number or 0>,
+        "days_late": 1
+      }},
+      "formula": "monthly_rent × (late_fee_percent/100) + (daily_fee × days_late)"
+    }},
+    {{
+      "scenario_type": "security_deposit",
+      "label": "Security Deposit Return",
+      "description": "Estimate deposit return after deductions",
+      "parameters": {{
+        "deposit_amount": <number or 0>,
+        "cleaning_fee": 0,
+        "damage_cost": 0,
+        "unpaid_balance": 0
+      }},
+      "formula": "deposit_amount - cleaning_fee - damage_cost - unpaid_balance"
+    }}
+  ]
+}}
+
+RULES:
+1. Extract actual numbers from document (rent, fees, deposits)
+2. Use 0 for values not found
+3. Only include simulations relevant to this document
+4. Output ONLY valid JSON, no other text"""
+
+        elif domain == "finance":
+            prompt = f"""You are analyzing a financial aid document for a university student. Extract ALL relevant simulation scenarios.
+
+DOCUMENT:
+{text[:4000]}
+
+FINANCIAL ANALYSIS:
+{financial[:1500] if financial else "N/A"}
+
+Your task: Identify EVERY possible "what-if" scenario a student might want to simulate based on this document.
+
+Think about:
+- What happens if they drop courses/credits?
+- What happens if they withdraw mid-semester?
+- What if they miss deadlines (FAFSA, verification, etc.)?
+- What if their enrollment status changes (full-time to part-time)?
+- What if they lose eligibility for certain aid types?
+- What about loan repayment scenarios?
+- What if they take a leave of absence?
+- SAP (Satisfactory Academic Progress) violations?
+
+Output JSON with 3-6 relevant simulations:
+{{
+  "simulations": [
+    {{
+      "scenario_type": "credit_reduction",
+      "label": "Credit Hour Reduction Impact",
+      "description": "Estimate aid reduction when dropping below full-time",
+      "parameters": {{
+        "current_aid": <extract from doc or use 15000>,
+        "current_credits": 15,
+        "new_credits": 9,
+        "full_time_threshold": 12
+      }},
+      "formula": "Prorated aid based on enrollment intensity"
+    }},
+    {{
+      "scenario_type": "withdrawal_refund",
+      "label": "Mid-Semester Withdrawal",
+      "description": "Calculate tuition refund and aid return if withdrawing",
+      "parameters": {{
+        "tuition_charged": <from doc or 16000>,
+        "aid_disbursed": <from doc or 12000>,
+        "weeks_completed": 4,
+        "total_weeks": 15
+      }},
+      "formula": "Federal Return of Title IV calculation"
+    }},
+    {{
+      "scenario_type": "fafsa_deadline_miss",
+      "label": "FAFSA Late Filing Impact",
+      "description": "Estimate priority aid loss from late FAFSA",
+      "parameters": {{
+        "total_aid": <from doc>,
+        "days_late": 30,
+        "state_aid_at_risk": <from doc or 2000>,
+        "institutional_aid_at_risk": <from doc or 3000>
+      }},
+      "formula": "Priority deadline aid loss estimation"
+    }},
+    {{
+      "scenario_type": "part_time_switch",
+      "label": "Full-Time to Part-Time Impact",
+      "description": "Aid changes when switching to part-time enrollment",
+      "parameters": {{
+        "current_grants": <from doc>,
+        "current_loans": <from doc>,
+        "new_enrollment_status": 0.5
+      }},
+      "formula": "Adjusted aid based on enrollment status"
+    }},
+    {{
+      "scenario_type": "gpa_drop_impact",
+      "label": "GPA Drop / SAP Violation Risk",
+      "description": "Aid loss risk if GPA falls below requirements",
+      "parameters": {{
+        "current_gpa": 2.5,
+        "required_gpa": 2.0,
+        "total_aid_at_risk": <from doc>
+      }},
+      "formula": "SAP violation consequences assessment"
+    }},
+    {{
+      "scenario_type": "loan_repayment_estimate",
+      "label": "Monthly Loan Repayment",
+      "description": "Estimate monthly payments after graduation",
+      "parameters": {{
+        "total_loan_amount": <from doc or 10000>,
+        "interest_rate": 5.5,
+        "repayment_years": 10
+      }},
+      "formula": "Standard 10-year repayment calculation"
+    }}
+  ]
+}}
+
+IMPORTANT RULES:
+1. Extract ACTUAL dollar amounts from the document - look for tuition, fees, grants, loans, scholarships
+2. Include AT LEAST 3 simulations, ideally 4-6 based on document content
+3. Make parameters realistic based on what you see in the document
+4. Every simulation MUST have scenario_type, label, description, parameters, formula
+5. Output ONLY valid JSON, no markdown, no explanation"""
+
+        elif domain == "visa":
+            prompt = f"""Analyze this visa/immigration document and extract simulation parameters.
+
+DOCUMENT:
+{text[:3000]}
+
+VISA ANALYSIS:
+{visa[:1000] if visa else "N/A"}
+
+Extract ONLY if relevant. Output JSON format:
+{{
+  "simulations": [
+    {{
+      "scenario_type": "work_hours_violation",
+      "label": "Work Hour Violation Risk",
+      "description": "Calculate risk of working over allowed hours",
+      "parameters": {{
+        "hours_worked": 20,
+        "max_allowed_hours": 20
+      }},
+      "formula": "Risk score based on excess hours"
+    }},
+    {{
+      "scenario_type": "course_load_drop",
+      "label": "Course Load Drop Impact",
+      "description": "Calculate SEVIS violation risk",
+      "parameters": {{
+        "current_credits": 12,
+        "minimum_credits": 12,
+        "has_rpe_approval": false
+      }},
+      "formula": "Risk score based on credit deficit"
+    }}
+  ]
+}}
+
+RULES:
+1. Extract requirements from document
+2. Use standard F-1 defaults (20 hrs work, 12 credits)
+3. Only include simulations relevant to this document
+4. Output ONLY valid JSON, no other text"""
+        else:
+            # Unknown domain - no simulations
+            print(f"🎲 [SIMULATION_AGENT] ⚠️ Unknown domain '{domain}' - no simulations available")
+            state["simulation_options"] = []
+            return state
+        
+        print(f"🎲 [SIMULATION_AGENT] Calling Gemini to extract simulation parameters...")
+        response = await call_gemini_with_reasoning(prompt, temperature=0.2)
+        print(f"🎲 [SIMULATION_AGENT] Gemini response length: {len(response)} chars")
+        print(f"🎲 [SIMULATION_AGENT] Gemini response preview: {response[:200]}...")
+        
+        # Parse JSON response
+        import json
+        try:
+            # Clean response - remove markdown code blocks if present
+            clean_response = response.strip()
+            if clean_response.startswith("```"):
+                clean_response = clean_response.split("```")[1]
+                if clean_response.startswith("json"):
+                    clean_response = clean_response[4:]
+            clean_response = clean_response.strip()
+            
+            print(f"🎲 [SIMULATION_AGENT] Parsing JSON response...")
+            data = json.loads(clean_response)
+            simulations = data.get("simulations", [])
+            
+            print(f"🎲 [SIMULATION_AGENT] Found {len(simulations)} simulations in response")
+            
+            # Validate and clean simulations
+            valid_simulations = []
+            for sim in simulations:
+                if all(k in sim for k in ["scenario_type", "label", "parameters", "formula"]):
+                    valid_simulations.append(sim)
+                    print(f"🎲 [SIMULATION_AGENT] ✓ Valid: {sim.get('scenario_type')} - {sim.get('label')}")
+                else:
+                    print(f"🎲 [SIMULATION_AGENT] ✗ Invalid simulation (missing keys): {sim}")
+            
+            state["simulation_options"] = valid_simulations
+            print(f"🎲 [SIMULATION_AGENT] ✅ Total valid simulations: {len(valid_simulations)}")
+            logger.info(f"[SIMULATION_AGENT] Extracted {len(valid_simulations)} simulations")
+            
+        except json.JSONDecodeError as e:
+            print(f"🎲 [SIMULATION_AGENT] ❌ JSON parse error: {e}")
+            print(f"🎲 [SIMULATION_AGENT] Raw response was: {response[:500]}")
+            logger.error(f"[SIMULATION_AGENT] Failed to parse JSON: {e}")
+            state["simulation_options"] = []
+        
+        return state
+        
+    except Exception as e:
+        print(f"🎲 [SIMULATION_AGENT] ❌ ERROR: {e}")
+        logger.error(f"Simulation agent error: {e}")
+        state["simulation_options"] = []
+        return state
+
+
 async def risk_agent(state: AgentState) -> AgentState:
     """
     Risk Agent: Performs holistic risk assessment through reasoning.
@@ -438,42 +720,49 @@ async def risk_agent(state: AgentState) -> AgentState:
         housing = state.get("housing_details", "")
         visa = state.get("visa_details", "")
         
-        prompt = f"""You are the Risk Agent - the final auditor of this document analysis. Your job is to identify RISKS and RED FLAGS.
+        prompt = f"""You are the Risk Agent. Analyze this document and output ONLY a risk level and red flags.
 
-ORIGINAL DOCUMENT:
+DOCUMENT EXCERPT:
 {text[:3000]}
 
 FINANCIAL ANALYSIS:
-{financial}
+{financial[:500] if financial else "N/A"}
 
 HOUSING ANALYSIS:
-{housing}
+{housing[:500] if housing else "N/A"}
 
 VISA ANALYSIS:
-{visa}
+{visa[:500] if visa else "N/A"}
 
-Now analyze and:
-1. IDENTIFY CONFLICTS between different sections or clauses
-2. FLAG HIGH-LIABILITY TERMS that could harm the student
-3. Highlight PREDATORY PRACTICES (e.g., excessive penalties, waived rights)
-4. Look for AMBIGUOUS LANGUAGE that could be interpreted against the student
-5. Assess OVERALL RISK LEVEL based on reasoning, not math
+OUTPUT FORMAT (be extremely concise):
+RISK_LEVEL: [LOW/MEDIUM/HIGH]
+RED_FLAGS: [comma-separated list of 3-5 specific red flags, or NONE]
 
-Assign an overall risk level: LOW, MEDIUM, or HIGH
+Example:
+RISK_LEVEL: HIGH
+RED_FLAGS: $2000 security deposit handling unclear, Late fee policy exceeds MA law, No clear termination clause"""
 
-Provide specific reasoning for each red flag. Be direct about what could go wrong."""
-
-        analysis = await call_gemini_with_reasoning(prompt, temperature=0.7)
+        analysis = await call_gemini_with_reasoning(prompt, temperature=0.5)
         
-        state["risk_assessment"] = analysis
+        # Extract risk level
+        risk_level = "MEDIUM"
+        if "RISK_LEVEL:" in analysis:
+            level_line = [line for line in analysis.split('\n') if "RISK_LEVEL:" in line][0]
+            if "HIGH" in level_line.upper():
+                risk_level = "HIGH"
+            elif "LOW" in level_line.upper():
+                risk_level = "LOW"
         
-        # Extract red flags (simple pattern matching on reasoning)
-        if "high" in analysis.lower():
-            state["red_flags"].append("Document contains high-risk terms")
-        if "predatory" in analysis.lower():
-            state["red_flags"].append("Potentially predatory practices identified")
-        if "ambiguous" in analysis.lower():
-            state["red_flags"].append("Ambiguous language that could harm student")
+        state["risk_assessment"] = ""  # No paragraph - just use visual risk score/level above
+        
+        # Extract red flags from analysis
+        if "RED_FLAGS:" in analysis:
+            flags_line = [line for line in analysis.split('\n') if "RED_FLAGS:" in line]
+            if flags_line:
+                flags_text = flags_line[0].replace("RED_FLAGS:", "").strip()
+                if flags_text and flags_text.upper() != "NONE":
+                    flags = [f.strip() for f in flags_text.split(',')]
+                    state["red_flags"].extend(flags[:5])
         
         return state
         

@@ -17,6 +17,7 @@ genai.configure(api_key=GEMINI_API_KEY)
 class ChatRequest(BaseModel):
     session_id: str = None
     message: str
+    language: str = "English"  # Target language for response
 
 
 class ChatResponse(BaseModel):
@@ -88,12 +89,14 @@ Obligations: {', '.join(risk_output.get('obligations', []))}
             print(f"💬 [CHAT] No RAG results - campus_embeddings collection may be empty")
         
         # Build enhanced prompt with RAG context
+        target_language = request.language if hasattr(request, 'language') else "English"
+        
         prompt = f"""You are Navigate413, an expert document assistant for UMass Amherst students.
 
 {f"CURRENT DOCUMENT:{doc_context}" if doc_context else "No document uploaded."}
 {rag_context}
 
-QUESTION: {message}
+QUESTION (in English): {message}
 
 CRITICAL RULES:
 1. READ THE CLAUSES THOROUGHLY - Extract exact numbers, dates, and terms
@@ -103,10 +106,11 @@ CRITICAL RULES:
 5. ONLY answer what was asked - don't add extra information unless critical
 6. If info is missing from clauses, say "Not specified in the document" and stop
 7. Use <b>bold tags</b> for important numbers and terms (NOT markdown asterisks)
+8. RESPOND IN {target_language} - The user will ask in English but you must answer in {target_language}
 
 FORMAT: [Direct answer with specifics] [Legal reference if present] [Brief implication if critical]
 
-RESPONSE:"""
+RESPONSE IN {target_language}:"""
         
         # Call Gemini
         model = genai.GenerativeModel(GEMINI_MODEL)

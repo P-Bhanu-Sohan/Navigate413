@@ -4,8 +4,6 @@ import { UploadZone } from '../components/UploadZone';
 import { RiskScoreCard } from '../components/RiskScoreCard';
 import { ClauseBreakdown } from '../components/ClauseBreakdown';
 import { ScenarioSimulator } from '../components/ScenarioSimulator';
-import { TranslationPanel } from '../components/TranslationPanel';
-import { ResourceLinks } from '../components/ResourceLinks';
 import { ChatWindow } from '../components/ChatWindow';
 
 export function Dashboard() {
@@ -61,13 +59,13 @@ export function Dashboard() {
       <header className="border-b border-slate-800 bg-slate-900 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-crimson-500 to-coral-500 rounded flex items-center justify-center">
-                <FileText className="w-6 h-6 text-white" />
+            <div className="flex items-center gap-4 mx-auto">
+              <div className="w-12 h-12 bg-gradient-to-br from-crimson-500 to-coral-500 rounded-lg flex items-center justify-center shadow-lg shadow-crimson-500/20">
+                <FileText className="w-7 h-7 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-white tracking-tight">Navigate413</h1>
-                <p className="text-xs text-slate-400">Document Intelligence Platform</p>
+                <h1 className="text-3xl font-bold bg-gradient-to-r from-crimson-400 via-coral-400 to-orange-400 bg-clip-text text-transparent tracking-tight">Navigate413</h1>
+                <p className="text-sm text-slate-300">Document Intelligence Platform</p>
               </div>
             </div>
           </div>
@@ -79,54 +77,54 @@ export function Dashboard() {
           // Initial State
           <div className="space-y-16">
             {/* Hero Section */}
-            <div className="space-y-8 text-center">
+            <div className="space-y-8 text-center animate-[fadeInUp_0.6s_ease-out]">
               <div>
                 <h2 className="text-5xl font-bold text-white mb-3 tracking-tight">
                   Understand Your Documents
                 </h2>
-                <p className="text-xl text-slate-400 max-w-2xl mx-auto">
+                <p className="text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed">
                   Extract key information, identify risks, and understand your obligations with intelligent document analysis.
                 </p>
               </div>
 
               {/* Feature Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-slate-600 transition">
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-crimson-500/50 hover:bg-slate-800/80 hover:scale-[1.02] transition-all duration-300 cursor-pointer group animate-[fadeInUp_0.6s_ease-out_0.1s_both]">
                   <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 bg-crimson-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-12 h-12 bg-crimson-500/10 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-crimson-500/20 transition-colors">
                       <FileText className="w-6 h-6 text-crimson-400" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-white mb-2">Smart Extraction</h3>
-                      <p className="text-slate-400 text-sm leading-relaxed">
+                      <p className="text-slate-300 text-base leading-relaxed">
                         Automatically extract obligations, deadlines, and key terms from financial aid letters, lease agreements, and visa documents.
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-slate-600 transition">
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-coral-500/50 hover:bg-slate-800/80 hover:scale-[1.02] transition-all duration-300 cursor-pointer group animate-[fadeInUp_0.6s_ease-out_0.2s_both]">
                   <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 bg-coral-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-12 h-12 bg-coral-500/10 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-coral-500/20 transition-colors">
                       <AlertTriangle className="w-6 h-6 text-coral-400" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-white mb-2">Risk Analysis</h3>
-                      <p className="text-slate-400 text-sm leading-relaxed">
+                      <p className="text-slate-300 text-base leading-relaxed">
                         Get detailed risk assessments with color-coded severity levels. Understand penalties and financial exposure before committing.
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-slate-600 transition">
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-8 hover:border-blue-500/50 hover:bg-slate-800/80 hover:scale-[1.02] transition-all duration-300 cursor-pointer group animate-[fadeInUp_0.6s_ease-out_0.3s_both]">
                   <div className="flex items-start gap-4">
-                    <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                    <div className="w-12 h-12 bg-blue-500/10 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:bg-blue-500/20 transition-colors">
                       <Headphones className="w-6 h-6 text-blue-400" />
                     </div>
                     <div>
                       <h3 className="text-lg font-semibold text-white mb-2">AI Support</h3>
-                      <p className="text-slate-400 text-sm leading-relaxed">
+                      <p className="text-slate-300 text-base leading-relaxed">
                         Ask follow-up questions about your documents. Get instant answers in plain language with context-aware responses.
                       </p>
                     </div>
@@ -209,14 +207,12 @@ export function Dashboard() {
                     <ClauseBreakdown clauses={analysis.clauses} />
                   )}
 
-                  {/* Resources */}
-                  <ResourceLinks resources={analysis.resources} />
-
-                  {/* Scenario & Translation */}
-                  <div className="grid grid-cols-1 gap-6">
-                    <ScenarioSimulator sessionId={sessionId} domain={analysis.domain} />
-                    <TranslationPanel sessionId={sessionId} />
-                  </div>
+                  {/* Scenario Simulator */}
+                  <ScenarioSimulator 
+                    sessionId={sessionId} 
+                    domain={analysis.domain}
+                    availableSimulations={analysis.available_simulations || []}
+                  />
 
                   {/* Obligations */}
                   {analysis.obligations && analysis.obligations.length > 0 && (
