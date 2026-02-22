@@ -10,7 +10,7 @@ GEMINI_EMBEDDING_MODEL = "text-embedding-004"
 
 # MongoDB Atlas
 MONGODB_URI = os.getenv("MONGODB_URI")
-MONGODB_DB_NAME = "navigate413"
+MONGODB_DB_NAME = "Navigate413"
 
 # DigitalOcean Spaces
 DO_SPACES_KEY = os.getenv("DO_SPACES_KEY")
