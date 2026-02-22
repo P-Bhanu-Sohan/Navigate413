@@ -1,110 +1,100 @@
-# Navigate413 - Document Analysis Platform for UMass Students
+Navigate413
 
-Navigate413 is a swarm-style multi-agent document reasoning platform that converts complex institutional documents into structured risk scores, scenario simulations, and campus resource referrals.
+Inspiration
 
-## Quick Start
+The concept for Navigate413 was born from a common struggle: the overwhelming density of university-related documents like financial aid letters, housing leases, and institutional notices. These documents are often written in complex legal or institutional language that is difficult for students to interpret accurately. This barrier frequently leads to missed deadlines, misunderstood obligations, and significant stress.
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- MongoDB Atlas account
-- Gemini API key
+This problem particularly affects international and first-generation students who may be encountering these specific bureaucratic structures for the first time. Our mission was to build a tool that does more than just summarize; we created a bridge that transforms static, confusing text into clear, actionable guidance.
 
-### Backend Setup
+What it does
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+Navigate413 converts complex institutional documents into structured insights to help students make informed decisions. Unlike a standard chatbot, it analyzes the specific consequences of a document, offering quantitative risk analysis and cause-effect modeling.
 
-Create `.env` file in the `backend` directory:
-```env
-GEMINI_API_KEY=your_key_here
-MONGODB_URI=mongodb+srv://...
-```
+Identifies Risks and Obligations: The system flags potential pitfalls and explains what the student is legally or financially bound to do.
+Simulates Scenarios: Through a specialized Scenario Agent, students can explore "what-if" decisions, such as the estimated cost of breaking a lease early.
+Real-time Translation: The application provides accurate contextual translation in a single click, supporting students who are not native English speakers.
+Campus Connectivity: It connects students to real campus help, such as the bursar or financial aid office.
+How we built it
 
-Run the backend:
-```bash
-cd backend
-uvicorn main:app --reload
-```
+The architecture of Navigate413 is centered around a Multi-Agent Coordination system powered by LangGraph, which orchestrates specialized agents to ensure high-quality, domain-specific outputs.
 
-Backend will be available at http://localhost:8000
+Advanced Document Parsing
 
-### Frontend Setup
+To ensure accuracy, our document pipeline uses a Hybrid PDF Parser:
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
+OCR and Text-Based Extraction: The system utilizes both Optical Character Recognition for scanned images and standard text extraction for digital PDFs.
+NLTK Integration: We leverage the Natural Language Toolkit for precise tokenization and segmentation of dense institutional text.
+Retrieval-Augmented Generation (RAG): This allows our agents to perform semantic retrieval, ensuring they pull the most relevant context from the document before generating an analysis.
+Technical Stack
 
-Frontend will be available at http://localhost:5173
+Gemini API
 
-## Architecture
+Serves as the core reasoning engine for complex document interpretation.
+Generates high-dimensional embeddings for the RAG pipeline.
+Powers the logic behind simulating "what-if" outcomes.
+MongoDB Atlas
 
-- **Backend**: FastAPI with LangGraph agent orchestration
-- **AI**: Google Gemini 1.5 Flash with structured output
-- **Database**: MongoDB Atlas with Vector Search
-- **Frontend**: React + Tailwind CSS
+Operates as our primary Vector Database for semantic retrieval.
+Manages the storage of document segments and metadata.
+Provides a scalable cloud environment for distributed data management.
+DigitalOcean
 
-## Features
+Acts as the primary hosting provider for the entire application.
+Supports the FastAPI backend for high-performance processing.
+Hosts the React and Tailwind frontend dashboard.
+Flowchart
 
-✅ **Document Upload** - PDF and scanned document support
-✅ **Risk Analysis** - Financial, housing, and visa domain analysis
-✅ **Plain Language Explanations** - Student-friendly summaries
-✅ **Scenario Simulation** - Deterministic financial exposure modeling
-✅ **Translation** - Multi-language support
-✅ **Resource Referrals** - Semantic search for campus services
+                               +----------------------+
+                               |    UMass Student     |
+                               +-----------+----------+
+                                           | (Upload PDF)
+                                           v
++------------------------------------------------------------------------+
+|                            Backend Service                             |
+|                         [ Hybrid Parsing Flow ]                        |
+|   1. OCR + Text Extraction -> 2. NLTK Segmentation -> 3. Gemini Embed  |
++------------------------------------+-----------------------------------+
+                                     | (Text & Embeddings)
+                                     v
+                           +-------------------------+
+                           |  MongoDB Atlas Platform | 
+                           | [DocStore & Vector Index]|
+                           +-------------------------+
+                                     ^
+                                     | (Semantic Retrieval)
+                                     |
++------------------------------------+-----------------------------------+
+|                            Backend Service                             |
+|                       [ LangGraph Agent Swarm ]                        |
+|    1. Intent Router -> 2. Specialist Agents (Finance, Housing, etc.)   |
+|    3. RAG Resource Agent -> 4. Translation Agent                       |
++------------------+-----------------+-----------------------------------+
+                   | (Specialist Data) | (Risk & Scenario Analysis)
+                   v                   v
+         +------------------+      +------------------+
+         |  Gemini 1.5 API  |      |   DigitalOcean   |
+         | (Reasoning/Logic)|      | (App Deployment) |
+         +--------+---------+      +---------+--------+
+                  |                          |
+                  +------------+-------------+
+                               | (Structured JSON)
+                               v
+                       +-----------------------+
+                       |    React Dashboard    |
+                       | (Interactive Insights)|
+                       +-----------------------+
+Challenges we ran into
 
-## Project Structure
+Building a distributed, agent-based system presented several infrastructure hurdles:
 
-```
-navigate413/
-├── backend/
-│   ├── main.py                 # FastAPI app
-│   ├── agents/                 # LangGraph agents
-│   ├── routers/                # API endpoints
-│   ├── db/                     # Database connectivity
-│   ├── pipelines/              # Text extraction & routing
-│   ├── models/                 # Pydantic schemas & risk models
-│   └── tools/                  # Retrieval tools
-├── frontend/
-│   ├── src/
-│   │   ├── components/         # React components
-│   │   ├── pages/              # Page layouts
-│   │   └── main.jsx            # Entry point
-│   └── index.html              # HTML template
-└── docker-compose.yml          # Container orchestration
-```
+Network Connectivity: We faced difficulties configuring MongoDB Atlas in its own cluster while allowing a specific IP from DigitalOcean to connect. This caused persistent network issues across distributed cluster nodes.
+Vector Search Complexity: Implementing and optimizing Vector Search on MongoDB Atlas required significant effort to ensure the RAG pipeline was both fast and accurate.
+Infrastructure Routing: We encountered routing issues on DigitalOcean between the IP and specific configuration permissions, leading to deployment delays.
+Institutional Nuance: Ensuring the AI focused on specific university workflows rather than general knowledge required careful prompt engineering and agent tuning.
+Accomplishments that we're proud of
 
-## API Endpoints
+We are proud to have built a system that is not just a ChatGPT wrapper. By using multiple orchestrated specialized agents, we provide quantitative analysis—such as calculating the financial risk of a delayed payment—rather than just a generic summary. We successfully transformed static, intimidating documents into interactive tools that empower students to act with confidence.
 
-- `POST /api/upload` - Upload document
-- `POST /api/analyze` - Analyze document
-- `POST /api/translate` - Translate summary
-- `POST /api/simulate` - Scenario simulation
-- `GET /api/resources` - Search campus resources
-- `GET /api/session/{session_id}` - Get session results
+What we learned
 
-## Development Notes
-
-- All agents use synchronous/blocking wrappers around async functions for LangGraph compatibility
-- Vector embeddings are generated using Gemini's `text-embedding-004`
-- Risk scores use formula-based calculation, not ML models
-- Document text extraction falls back from pdfplumber to pytesseract for scanned docs
-
-## Deployment
-
-Docker image is provided. For DigitalOcean App Platform:
-
-1. Push to GitHub
-2. Connect repository to DigitalOcean App Platform
-3. Set environment variables
-4. Deploy
-
-## License
-
-Internal project for UMass Amherst
+We learned that the gap between university resources and student understanding is often a matter of language and accessibility. We also discovered that effective AI orchestration requires a deep integration of specialized tools—like combining NLTK for parsing with LangGraph for stateful logic—to handle the nuances of institutional documentation.
