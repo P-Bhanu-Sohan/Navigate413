@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -60,16 +61,23 @@ async def upload_document(file: UploadFile = File(...)):
         # Split into clauses
         clauses = split_into_clauses(text)
         
-        # Store clauses with embeddings
-        for i, clause in enumerate(clauses):
-            await store_clause_embedding(
+        # Generate and store all clause embeddings in parallel
+        embedding_tasks = [
+            store_clause_embedding(
                 session_id=session_id,
                 clause_text=clause,
                 domain="unknown",
-                risk_metadata={"clause_index": i}
+                risk_metadata={"clause_index": i},
             )
+            for i, clause in enumerate(clauses)
+        ]
+        results = await asyncio.gather(*embedding_tasks, return_exceptions=True)
+        failed = sum(1 for r in results if isinstance(r, Exception) or r is False)
+        if failed:
+            logger.warning(f"{failed}/{len(clauses)} clause embeddings failed for session {session_id}")
         
-        logger.info(f"Stored {len(clauses)} clause embeddings for session {session_id}")
+        stored = len(clauses) - failed
+        logger.info(f"Stored {stored}/{len(clauses)} clause embeddings for session {session_id}")
         
         # Create document metadata with extracted text
         doc_metadata = {
